@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Env files (anon key is public, but keep local env out of VCS by convention)
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

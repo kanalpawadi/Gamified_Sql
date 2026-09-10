@@ -1098,3 +1098,286 @@ code, pre, .mono { font-family: var(--font-code); }
 }
 
 .badge-toast-emoji { font-size: 1.5rem; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   SUPABASE FEATURE LAYER — additive styles (tokens only; palette unchanged)
+   Auth · copy-protection · view nav · labs · certificates · mam dashboard
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Copy protection ─────────────────────────────────────────────────────────── */
+.copy-protected {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+}
+
+/* ── View nav (student header segmented control) ─────────────────────────────── */
+.view-nav { display: inline-flex; gap: 4px; }
+
+/* ── Auth screen ─────────────────────────────────────────────────────────────── */
+.auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(1200px 500px at 50% -10%, var(--primary-10), transparent 60%),
+    var(--bg);
+}
+
+.auth-card { width: 100%; max-width: 440px; }
+.auth-card .card-body,
+.auth-card { padding: 0; }
+
+.auth-brand { text-align: center; padding: 28px 28px 8px; }
+.auth-logo {
+  font-family: var(--font-head);
+  font-size: 1.9rem;
+  font-weight: 800;
+  color: var(--primary);
+  letter-spacing: -0.02em;
+}
+.auth-logo span { color: var(--gold); }
+.auth-tagline { color: var(--muted); font-size: 0.9rem; margin-top: 4px; }
+
+.auth-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 20px 0;
+  border-bottom: 1px solid var(--border);
+}
+.auth-tab {
+  flex: 1;
+  padding: 10px 8px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+  transition: all 0.15s;
+}
+.auth-tab:hover { color: var(--ink); }
+.auth-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+.auth-form { padding: 20px 28px 8px; display: flex; flex-direction: column; gap: 12px; }
+
+.auth-field { display: flex; flex-direction: column; gap: 5px; }
+.auth-field > span { font-size: 0.78rem; font-weight: 600; color: var(--muted); }
+
+.auth-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+}
+.auth-input:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+textarea.auth-input { resize: vertical; line-height: 1.5; }
+
+.auth-submit { width: 100%; margin-top: 4px; }
+
+.auth-error {
+  background: var(--error-10);
+  border: 1px solid var(--error-30);
+  color: var(--error);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font-size: 0.83rem;
+}
+.auth-notice {
+  background: var(--primary-10);
+  border: 1px solid var(--primary-20);
+  color: var(--primary);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font-size: 0.83rem;
+}
+.auth-linkbtn {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px;
+  text-align: center;
+}
+.auth-linkbtn:hover { text-decoration: underline; }
+.auth-foot { text-align: center; color: var(--muted); font-size: 0.78rem; padding: 8px 28px 24px; }
+
+/* ── Full-width scrolling main (labs / certs / mam) ──────────────────────────── */
+.mam-main {
+  height: calc(100vh - var(--header-h));
+  overflow-y: auto;
+  background: var(--bg);
+  padding: 24px;
+}
+
+/* ── Labs (shared student + mam grids) ───────────────────────────────────────── */
+.labs-wrap, .mam-wrap, .certs-wrap { max-width: 1100px; margin: 0 auto; }
+.labs-head { margin-bottom: 16px; }
+.labs-head h2 { font-size: 1.4rem; margin-bottom: 4px; }
+
+.labs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.lab-card { text-align: left; cursor: pointer; font-family: var(--font-body); }
+button.lab-card { border-width: 1px; }
+.lab-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); transition: all 0.15s; }
+.lab-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.lab-card-title { font-size: 1.1rem; margin-bottom: 6px; color: var(--ink); }
+.lab-card-desc { font-size: 0.85rem; color: var(--muted); margin-bottom: 12px; min-height: 2.4em; }
+.lab-card-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lab-progress-text { font-size: 0.78rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.lab-progress-track { flex: 1; min-width: 60px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.lab-progress-fill { height: 100%; background: var(--success); border-radius: 3px; transition: width 0.4s ease; }
+.lab-complete-tag { font-size: 0.75rem; font-weight: 700; color: var(--success); }
+.badge-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.74rem; font-weight: 700; color: #8a6d1a;
+  background: var(--gold-10); border: 1px solid var(--gold-30);
+  padding: 2px 8px; border-radius: 20px;
+}
+
+/* ── Lab solver ──────────────────────────────────────────────────────────────── */
+.lab-solver { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.lab-solver-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.lab-solver-title { font-family: var(--font-head); font-size: 1.1rem; color: var(--ink); flex: 1; }
+.lab-qnav { display: flex; gap: 6px; flex-wrap: wrap; }
+.lab-qchip {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 1px solid var(--border-strong); background: var(--panel);
+  font-weight: 700; font-size: 0.85rem; cursor: pointer; color: var(--muted);
+  transition: all 0.12s;
+}
+.lab-qchip:hover { border-color: var(--primary); color: var(--primary); }
+.lab-qchip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.lab-qchip.done { background: var(--success-10); border-color: var(--success-30); color: var(--success); }
+.lab-qchip.done.active { background: var(--success); color: #fff; }
+
+.lab-solver-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.lab-solver-left, .lab-solver-right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+/* ── Lab creator ─────────────────────────────────────────────────────────────── */
+.lab-creator { max-width: 900px; }
+.lc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.lc-questions { margin-top: 8px; }
+.lc-question {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 10px;
+  background: var(--bg);
+}
+.lc-qnum { font-weight: 700; color: var(--primary); font-size: 0.85rem; }
+.lc-valid { font-size: 0.78rem; margin-top: 6px; color: var(--muted); }
+.lc-valid.ok { color: var(--success); font-weight: 600; }
+.lc-valid.err { color: var(--error); font-weight: 600; font-family: var(--font-code); }
+
+.lc-schema-ref {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.lc-section-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.lc-section-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--panel);
+  transition: all 0.12s ease;
+  user-select: none;
+}
+.lc-section-chip:hover { background: var(--bg); }
+.lc-section-chip.on {
+  background: var(--primary-10);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.lc-section-chip input { accent-color: var(--primary); cursor: pointer; }
+
+.lc-table-chip {
+  display: inline-block;
+  font-family: var(--font-code);
+  font-size: 0.76rem;
+  color: var(--primary);
+  background: var(--primary-10);
+  border: 1px solid var(--primary-20);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin: 0 4px 4px 0;
+}
+
+/* ── Certificates ────────────────────────────────────────────────────────────── */
+.certs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+.cert-card { text-align: center; }
+.cert-seal { font-size: 2.4rem; margin-bottom: 6px; }
+.cert-title { font-size: 1.05rem; color: var(--primary); margin-bottom: 4px; }
+.cert-meta { font-size: 0.78rem; color: var(--muted); margin-bottom: 12px; }
+.certs-progress {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+/* ── Mam dashboard ───────────────────────────────────────────────────────────── */
+.mam-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.mam-head h2 { font-size: 1.4rem; }
+.mam-stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.mam-stat { text-align: center; }
+.mam-stat-value { font-family: var(--font-head); font-size: 2rem; font-weight: 800; color: var(--primary); }
+.mam-stat-label { font-size: 0.76rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+.mam-table-wrap { overflow-x: auto; }
+.mam-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+.mam-table thead { background: var(--primary); color: #fff; }
+.mam-table th {
+  padding: 10px 14px; text-align: left; font-weight: 600; white-space: nowrap;
+  font-size: 0.74rem; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.mam-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.mam-table tbody tr:hover td { background: var(--primary-10); }
+.mam-table tbody tr:last-child td { border-bottom: none; }
+.mam-name { font-weight: 600; color: var(--ink); }
+.mam-mastery { display: flex; align-items: center; gap: 8px; }
+
+/* ── Responsive ──────────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .lab-solver-grid, .lc-grid { grid-template-columns: 1fr; }
+  .mam-main { height: auto; }
+  .app-header { flex-wrap: wrap; height: auto; min-height: var(--header-h); padding-top: 6px; padding-bottom: 6px; }
+}

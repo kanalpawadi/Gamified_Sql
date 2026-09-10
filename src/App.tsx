@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './index.css';
 import { allQuestions } from './data/index';
 import type { Question } from './data/index';
-import { gradeQuery, runEphemeralQuery } from './engine/sqlEngine';
+import { gradeQuery } from './engine/sqlEngine';
 import type { GradingResult, QueryResult } from './engine/sqlEngine';
 import { classifyError, analyzePostMortem } from './engine/classifier';
 import type { Classification } from './engine/classifier';
@@ -10,8 +10,6 @@ import {
   loadXP, saveXP, computeLevel, xpForNextLevel,
   loadDailyStreak, updateDailyStreak,
   loadSessionStreak, saveSessionStreak,
-  loadSkillProfile, saveSkillProfile,
-  loadCompletedIds, saveCompletedIds,
   loadWeakTags, saveWeakTags,
   loadQuestionIndex, saveQuestionIndex,
   loadStuckTagHistory, saveStuckTagHistory,
@@ -21,6 +19,17 @@ import {
   type BadgeId, type SkillProfile
 } from './engine/adaptiveEngine';
 import { getMicroLessonForTag } from './data/microLessons';
+// ── Supabase-backed layer ──────────────────────────────────────────────────
+import { useAuth } from './auth/AuthContext';
+import {
+  loadProgress, recordAttempt, touchLastActive, issueMilestoneCertificatesIfEarned,
+} from './progress/progressApi';
+import { LabsSection } from './labs/LabsSection';
+import { CertificatesSection } from './certificates/CertificatesSection';
+import { CopyGuard } from './components/CopyGuard';
+import { SqlEditor } from './components/SqlEditor';
+import { ResultsGrid } from './components/ResultsGrid';
+import { SchemaBlock } from './components/SchemaBlock';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,17 +54,30 @@ interface SessionState {
 
 // ── Main App ─────────────────────────────────────────────────────────────────
 
-export default function App() {
+export function StudentApp() {
+  const { session: authSession, profile, signOut } = useAuth();
+  const uid = authSession!.user.id;
+
   // ── Persistent state ────────────────────────────────────────────────────
-  const [xp, setXP] = useState(() => loadXP());
-  const [dailyStreak, setDailyStreak] = useState(() => loadDailyStreak());
-  const [sessionStreak, setSessionStreak] = useState(() => loadSessionStreak());
-  const [skillProfile, setSkillProfile] = useState<SkillProfile>(() => loadSkillProfile());
-  const [completedIds, setCompletedIds] = useState<Set<string>>(() => loadCompletedIds());
-  const [weakTags, setWeakTags] = useState<Set<string>>(() => loadWeakTags());
-  const [questionIndex, setQuestionIndex] = useState(() => loadQuestionIndex());
-  const [stuckTagHistory, setStuckTagHistory] = useState(() => loadStuckTagHistory());
+  // XP / streaks / drafts stay in localStorage (device-local gamification,
+  // namespaced by user via the switch-reset in the init effect below).
+  // completedIds + skillProfile are the SOURCE OF TRUTH in Supabase and are
+  // derived from question_attempts on load.
+  const [xp, setXP] = useState(0);
+  const [dailyStreak, setDailyStreak] = useState(0);
+  const [sessionStreak, setSessionStreak] = useState(0);
+  const [skillProfile, setSkillProfile] = useState<SkillProfile>({});
+  const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
+  const [weakTags, setWeakTags] = useState<Set<string>>(new Set());
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [stuckTagHistory, setStuckTagHistory] = useState<Record<string, number>>({});
   const [badges, setBadges] = useState(() => loadBadges());
+
+  // Supabase-derived / view state
+  const [progressLoaded, setProgressLoaded] = useState(false);
+  const [completedByCategory, setCompletedByCategory] = useState({ basic: 0, intermediate: 0, advanced: 0 });
+  const [studentView, setStudentView] = useState<'quest' | 'labs' | 'certs'>('quest');
+  const [certToast, setCertToast] = useState<string | null>(null);
 
   // ── UI state ─────────────────────────────────────────────────────────────
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
@@ -89,12 +111,54 @@ export default function App() {
   const queryRef = useRef(sqlQuery);
   queryRef.current = sqlQuery;
 
-  // ── Init ─────────────────────────────────────────────────────────────────
+  // ── Init: load Supabase progress + local gamification ────────────────────
   useEffect(() => {
-    const streak = updateDailyStreak();
-    setDailyStreak(streak);
-    loadNextQuestion(false);
-  }, []);
+    let active = true;
+    (async () => {
+      // If a different user last used this browser, clear their device-local
+      // gamification (XP / streak / drafts) so nothing bleeds across accounts.
+      const prevUid = localStorage.getItem('sqlquest_active_uid');
+      if (prevUid !== uid) {
+        Object.keys(localStorage)
+          .filter((k) => k.startsWith('sqlquest_'))
+          .forEach((k) => localStorage.removeItem(k));
+        localStorage.setItem('sqlquest_active_uid', uid);
+      }
+
+      const streak = updateDailyStreak();
+      if (!active) return;
+      setDailyStreak(streak);
+      setSessionStreak(loadSessionStreak());
+      setWeakTags(loadWeakTags());
+      setQuestionIndex(loadQuestionIndex());
+      setStuckTagHistory(loadStuckTagHistory());
+      setBadges(loadBadges());
+
+      // Supabase source of truth for graded progress.
+      const prog = await loadProgress(uid);
+      if (!active) return;
+      setCompletedIds(prog.completedIds);
+      setSkillProfile(prog.skillProfile);
+      setCompletedByCategory(prog.completedByCategory);
+      const xp0 = Math.max(loadXP(), prog.derivedXp);
+      setXP(xp0);
+      saveXP(xp0);
+      setProgressLoaded(true);
+      touchLastActive(uid);
+      // Retroactively issue any milestone certificate already earned (e.g. a
+      // student who crossed a threshold before this feature existed).
+      issueMilestoneCertificatesIfEarned(prog.completedByCategory)
+        .then((titles) => { if (titles.length) { setCertToast(titles[0]); setTimeout(() => setCertToast(null), 6000); } })
+        .catch(() => {});
+    })();
+    return () => { active = false; };
+  }, [uid]);
+
+  // Load the first question once progress is ready.
+  useEffect(() => {
+    if (progressLoaded && !currentQuestion) loadNextQuestion(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [progressLoaded]);
 
   // ── Idle stuck detection ─────────────────────────────────────────────────
   useEffect(() => {
@@ -201,11 +265,15 @@ export default function App() {
       setQueryLog(prev => [logEntry, ...prev].slice(0, 20));
       
       if (grade.passed) {
+        // Central progress tracking (Supabase source of truth).
+        await recordAttempt({ question: currentQuestion, passed: true, errorClass: null, sql: sqlQuery });
         await handlePass(currentQuestion, sqlQuery);
       } else {
         const cls = classifyError(sqlQuery, currentQuestion, grade);
         setClassification(cls);
-        
+        recordAttempt({ question: currentQuestion, passed: false, errorClass: cls.errorClass, sql: sqlQuery })
+          .catch(() => {});
+
         const newAttempts = session.attemptCount + 1;
         setSession(s => ({ ...s, attemptCount: newAttempts, lastQueryAt: Date.now() }));
         
@@ -245,16 +313,29 @@ export default function App() {
     setSessionStreak(newSessionStreak);
     saveSessionStreak(newSessionStreak);
     
-    // Update skill profile
+    // Update skill profile (in-memory; Supabase question_attempts is the store)
     const updatedProfile = updateTagProfile(skillProfile, question.tags, true);
     setSkillProfile(updatedProfile);
-    saveSkillProfile(updatedProfile);
-    
-    // Mark completed
+
+    // Mark completed (in-memory)
+    const wasCompleted = completedIds.has(question.id);
     const updatedCompleted = new Set<string>(completedIds);
     updatedCompleted.add(question.id);
     setCompletedIds(updatedCompleted);
-    saveCompletedIds(updatedCompleted);
+
+    // Milestone certificates — update per-category counts + auto-issue.
+    if (!wasCompleted && question.category in completedByCategory) {
+      const cat = question.category as 'basic' | 'intermediate' | 'advanced';
+      const nextByCat = { ...completedByCategory };
+      nextByCat[cat] = nextByCat[cat] + 1;
+      setCompletedByCategory(nextByCat);
+      const newCerts = await issueMilestoneCertificatesIfEarned(nextByCat);
+      if (newCerts.length > 0) {
+        setCertToast(newCerts[0]);
+        setTimeout(() => setCertToast(null), 6000);
+      }
+    }
+    touchLastActive(uid);
     
     // Remove from weak tags if it was there
     const updatedWeak = new Set<string>(weakTags);
@@ -303,7 +384,8 @@ export default function App() {
     );
     
     setSkillProfile(updatedProfile);
-    saveSkillProfile(updatedProfile);
+    // (skill profile is derived from Supabase question_attempts; stuck history
+    // stays in localStorage as a session-adaptive aid.)
     setStuckTagHistory(updatedHistory);
     saveStuckTagHistory(updatedHistory);
     
@@ -402,11 +484,11 @@ export default function App() {
   const badgesData = loadBadges();
   const unlockedCount = Object.values(badgesData).filter(Boolean).length;
 
-  if (!currentQuestion) {
+  if (!progressLoaded) {
     return (
       <div className="welcome-screen">
         <div className="loading-spinner" />
-        <p className="text-muted">Loading SQLQuestByKP…</p>
+        <p className="text-muted">Loading your progress…</p>
       </div>
     );
   }
@@ -419,18 +501,27 @@ export default function App() {
           SQLQuest<span>ByKP</span>
         </a>
         <div className="header-sep" aria-hidden />
-        <div className="header-question-title" aria-label={`Current question: ${currentQuestion.title}`}>
-          {currentQuestion.title}
-        </div>
-        <div className="pill pill-easy" style={{ marginLeft: '8px' }}>
-          {currentQuestion.difficulty}
-        </div>
-        <div className={`pill pill-${currentQuestion.category}`}>
-          {currentQuestion.category}
-        </div>
-        <div className="points-badge">
-          ★ {currentQuestion.points} pts
-        </div>
+        {studentView === 'quest' && currentQuestion ? (
+          <>
+            <div className="header-question-title" aria-label={`Current question: ${currentQuestion.title}`}>
+              {currentQuestion.title}
+            </div>
+            <div className="pill pill-easy" style={{ marginLeft: '8px' }}>
+              {currentQuestion.difficulty}
+            </div>
+            <div className={`pill pill-${currentQuestion.category}`}>
+              {currentQuestion.category}
+            </div>
+            <div className="points-badge">
+              ★ {currentQuestion.points} pts
+            </div>
+          </>
+        ) : (
+          <div className="header-question-title">
+            {studentView === 'labs' ? '🧪 Lab Experiments' : '📜 Certificates'}
+            {profile?.full_name ? ` · ${profile.full_name}` : ''}
+          </div>
+        )}
 
         <div className="header-right">
           <div className="streak-display" aria-label={`${dailyStreak} day streak`}>
@@ -441,32 +532,70 @@ export default function App() {
             <span>Lv.{level}</span>
             <span className="xp-value">{xp.toLocaleString()} XP</span>
           </div>
-          <button className="btn btn-ghost-inv btn-sm" onClick={() => setShowModal('badges')}>
-            🏆 {unlockedCount}
-          </button>
-          <button className="btn btn-ghost-inv btn-sm" onClick={openRecap}>
-            📊 Recap
-          </button>
-          <button className="btn btn-ghost-inv btn-sm" onClick={() => setShowModal('browser')}>
-            📚 Questions
-          </button>
-          <button
-            className="btn btn-gold btn-sm"
-            onClick={() => loadNextQuestion(true)}
-            aria-label="Load next question"
-          >
-            Next →
+
+          <div className="view-nav" role="tablist" aria-label="Sections">
+            <button className={`btn btn-sm ${studentView === 'quest' ? 'btn-gold' : 'btn-ghost-inv'}`} onClick={() => setStudentView('quest')} aria-pressed={studentView === 'quest'}>⚔️ Quest</button>
+            <button className={`btn btn-sm ${studentView === 'labs' ? 'btn-gold' : 'btn-ghost-inv'}`} onClick={() => setStudentView('labs')} aria-pressed={studentView === 'labs'}>🧪 Labs</button>
+            <button className={`btn btn-sm ${studentView === 'certs' ? 'btn-gold' : 'btn-ghost-inv'}`} onClick={() => setStudentView('certs')} aria-pressed={studentView === 'certs'}>📜 Certs</button>
+          </div>
+
+          {studentView === 'quest' && (
+            <>
+              <button className="btn btn-ghost-inv btn-sm" onClick={() => setShowModal('badges')}>
+                🏆 {unlockedCount}
+              </button>
+              <button className="btn btn-ghost-inv btn-sm" onClick={openRecap}>
+                📊 Recap
+              </button>
+              <button className="btn btn-ghost-inv btn-sm" onClick={() => setShowModal('browser')}>
+                📚 Questions
+              </button>
+              <button
+                className="btn btn-gold btn-sm"
+                onClick={() => loadNextQuestion(true)}
+                aria-label="Load next question"
+              >
+                Next →
+              </button>
+            </>
+          )}
+          <button className="btn btn-ghost-inv btn-sm" onClick={signOut} aria-label="Sign out" title={profile?.prn ? `Signed in as ${profile.prn}` : 'Sign out'}>
+            ⎋ Sign out
           </button>
         </div>
       </header>
 
-      {/* ── Two-column layout ───────────────────────────────────────────── */}
+      {/* ── Labs view ───────────────────────────────────────────────────── */}
+      {studentView === 'labs' && (
+        <main className="mam-main" role="main">
+          <LabsSection
+            section={profile?.class_section ?? null}
+            onCompletion={() => {
+              setCertToast('Lab completed — badge & certificate awarded!');
+              setTimeout(() => setCertToast(null), 6000);
+            }}
+          />
+        </main>
+      )}
+
+      {/* ── Certificates view ────────────────────────────────────────────── */}
+      {studentView === 'certs' && (
+        <main className="mam-main" role="main">
+          <CertificatesSection
+            fullName={profile?.full_name ?? 'Student'}
+            completedByCategory={completedByCategory}
+          />
+        </main>
+      )}
+
+      {/* ── Quest view (two-column layout) ──────────────────────────────── */}
+      {studentView === 'quest' && currentQuestion && (
       <main className="app-layout" role="main">
         {/* ── Left: Problem Panel ─────────────────────────────────────── */}
         <div className="panel-left" role="region" aria-label="Problem Panel">
           <div className="question-reveal">
-            {/* Problem statement */}
-            <div className="ledger-card card">
+            {/* Problem statement — copy-protected (prompt + expected output) */}
+            <CopyGuard className="ledger-card card">
               <div className="card-header">
                 <span aria-hidden>📋</span> Problem Statement
               </div>
@@ -479,10 +608,10 @@ export default function App() {
                   </div>
                 </div>
               </div>
-            </div>
+            </CopyGuard>
 
-            {/* Schema */}
-            <div className="ledger-card card">
+            {/* Schema — copy-protected */}
+            <CopyGuard className="ledger-card card">
               <div className="card-header">
                 <button
                   className="collapsible-trigger"
@@ -501,10 +630,10 @@ export default function App() {
                   <SchemaBlock sql={currentQuestion.schemaSQL} />
                 </div>
               )}
-            </div>
+            </CopyGuard>
 
-            {/* Sample data */}
-            <div className="ledger-card card">
+            {/* Sample data — copy-protected */}
+            <CopyGuard className="ledger-card card">
               <div className="card-header">
                 <button
                   className="collapsible-trigger"
@@ -523,7 +652,7 @@ export default function App() {
                   <SchemaBlock sql={currentQuestion.seedSQL.slice(0, 1200) + (currentQuestion.seedSQL.length > 1200 ? '\n-- (truncated for display)' : '')} />
                 </div>
               )}
-            </div>
+            </CopyGuard>
 
             {/* Hints */}
             {currentQuestion.hints.length > 0 && (
@@ -667,9 +796,9 @@ export default function App() {
             </div>
           )}
 
-          {/* Expected vs actual diff */}
+          {/* Expected vs actual diff — copy-protected (expected output) */}
           {gradingResult && !gradingResult.passed && gradingResult.expectedResult && gradingResult.diff && (
-            <div className="ledger-card card ledger-error">
+            <CopyGuard className="ledger-card card ledger-error">
               <div className="card-header">
                 <span aria-hidden>🎯</span> Expected Result
                 <span className="text-muted text-sm" style={{ marginLeft: '8px' }}>
@@ -679,7 +808,7 @@ export default function App() {
               <div className="card-body" style={{ padding: '0' }}>
                 <ResultsGrid result={gradingResult.expectedResult} />
               </div>
-            </div>
+            </CopyGuard>
           )}
 
           {/* Query log */}
@@ -698,6 +827,7 @@ export default function App() {
           )}
         </div>
       </main>
+      )}
 
       {/* ── Modals ──────────────────────────────────────────────────────── */}
       {showModal === 'badges' && (
@@ -749,31 +879,23 @@ export default function App() {
           </div>
         ) : null;
       })()}
+
+      {/* Certificate toast notification */}
+      {certToast && (
+        <div className="badge-toast" role="alert" aria-live="polite" style={{ background: 'var(--gold)' }}>
+          <span className="badge-toast-emoji" aria-hidden>📜</span>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>Certificate Earned!</div>
+            <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>{certToast}</div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
-// ── Schema Block Component ────────────────────────────────────────────────────
-
-function SchemaBlock({ sql }: { sql: string }) {
-  const keywords = /\b(CREATE|TABLE|PRIMARY|KEY|NOT|NULL|DEFAULT|UNIQUE|INSERT|INTO|VALUES|INTEGER|REAL|TEXT|INTEGER|REFERENCES|ON|DELETE|CASCADE|WITH|AS|SELECT|FROM|WHERE|JOIN|LEFT|INNER|GROUP|BY|ORDER|HAVING|LIMIT|OFFSET|DISTINCT|COUNT|SUM|AVG|MIN|MAX|CASE|WHEN|THEN|ELSE|END|AND|OR|IN|LIKE|BETWEEN|IS|UNION|ALL|RANK|OVER|PARTITION|ROW_NUMBER|DENSE_RANK|LAG|LEAD|EXISTS)\b/g;
-  
-  const highlighted = sql
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/'([^']*?)'/g, '<span class="str">\'$1\'</span>')
-    .replace(keywords, '<span class="kw">$1</span>')
-    .replace(/\b(INTEGER|REAL|TEXT|NUMERIC|BOOLEAN)\b/g, '<span class="type">$1</span>');
-  
-  return (
-    <div
-      className="schema-block"
-      aria-label="SQL schema code"
-      dangerouslySetInnerHTML={{ __html: highlighted }}
-    />
-  );
-}
+// SchemaBlock / SqlEditor / ResultsGrid now live in src/components and are
+// imported at the top of this file (shared with the Labs UI).
 
 // ── Editor Toolbar ────────────────────────────────────────────────────────────
 
@@ -805,99 +927,6 @@ function EditorToolbar({
         </button>
       </div>
     </div>
-  );
-}
-
-// ── SQL Editor (CodeMirror 6) ─────────────────────────────────────────────────
-
-import { useRef as useEditorRef } from 'react';
-import { basicSetup, EditorView } from 'codemirror';
-import { keymap } from '@codemirror/view';
-import { EditorState } from '@codemirror/state';
-import { sql } from '@codemirror/lang-sql';
-
-function SqlEditor({
-  value,
-  onChange,
-  onExecute
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onExecute: () => void;
-}) {
-  const containerRef = useEditorRef<HTMLDivElement>(null);
-  const viewRef = useEditorRef<EditorView | null>(null);
-  const onChangeRef = useRef(onChange);
-  const onExecuteRef = useRef(onExecute);
-  onChangeRef.current = onChange;
-  onExecuteRef.current = onExecute;
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const executeKeymap = keymap.of([{
-      key: 'Ctrl-Enter',
-      mac: 'Cmd-Enter',
-      run: () => { onExecuteRef.current(); return true; }
-    }]);
-
-    const state = EditorState.create({
-      doc: value,
-      extensions: [
-        basicSetup,
-        sql(),
-        executeKeymap,
-        EditorView.updateListener.of(update => {
-          if (update.docChanged) {
-            onChangeRef.current(update.state.doc.toString());
-          }
-        }),
-        EditorView.theme({
-          '&': { height: '100%', minHeight: '200px' },
-          '.cm-scroller': { fontFamily: 'var(--font-code)', fontSize: '0.88rem', overflow: 'auto' },
-          '.cm-content': { padding: '12px 0' },
-          '.cm-line': { padding: '0 14px' },
-          '.cm-gutters': {
-            background: '#F5F0E8',
-            borderRight: '1px solid rgba(31,27,22,0.10)',
-            color: '#6B6558',
-            minWidth: '40px'
-          },
-          '.cm-activeLineGutter': { background: 'rgba(43,58,103,0.06)' },
-          '.cm-activeLine': { background: 'rgba(43,58,103,0.04)' },
-          '.cm-cursor': { borderLeftColor: '#2B3A67' },
-          '.cm-selectionBackground': { background: 'rgba(43,58,103,0.12) !important' },
-          '&.cm-focused .cm-selectionBackground': { background: 'rgba(43,58,103,0.18) !important' },
-        })
-      ]
-    });
-
-    const view = new EditorView({ state, parent: containerRef.current });
-    viewRef.current = view;
-
-    return () => { view.destroy(); viewRef.current = null; };
-  }, []);
-
-  // Sync external value changes (e.g. load draft)
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    const current = view.state.doc.toString();
-    if (current !== value) {
-      view.dispatch({
-        changes: { from: 0, to: current.length, insert: value }
-      });
-    }
-  }, [value]);
-
-  return (
-    <div
-      ref={containerRef}
-      style={{ minHeight: '220px' }}
-      aria-label="SQL query editor"
-      role="textbox"
-      aria-multiline
-    />
   );
 }
 
@@ -973,57 +1002,6 @@ function VerdictBanner({
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-// ── Results Grid ──────────────────────────────────────────────────────────────
-
-function ResultsGrid({
-  result,
-  diff
-}: {
-  result: QueryResult;
-  diff?: GradingResult['diff'];
-}) {
-  if (result.columns.length === 0 && result.rows.length === 0) {
-    return (
-      <div style={{ padding: '16px', color: 'var(--muted)', fontSize: '0.88rem', textAlign: 'center' }}>
-        Query executed successfully with no results.
-      </div>
-    );
-  }
-
-  const extraRowKeys = new Set(
-    (diff?.extraRows || []).map(r => r.join('\x00'))
-  );
-
-  return (
-    <div className="results-grid-wrapper">
-      <table className="results-grid" aria-label="Query results">
-        <thead>
-          <tr>
-            {result.columns.map((col, i) => (
-              <th key={i} scope="col">{col}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {result.rows.map((row, ri) => {
-            const rowKey = row.join('\x00');
-            const isExtra = extraRowKeys.has(rowKey);
-            return (
-              <tr key={ri} className={isExtra ? 'row-extra' : ''}>
-                {row.map((cell, ci) => (
-                  <td key={ci} className={cell === null ? 'null-cell' : ''}>
-                    {cell === null ? 'NULL' : String(cell)}
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
     </div>
   );
 }

@@ -2,6 +2,13 @@
 
 > **Duolingo for SQL**, powered by an ephemeral in-browser SQLite WASM engine (`sql.js`) that knows what you're actually stuck on.
 
+> [!IMPORTANT]
+> **Supabase backend edition.** This build adds accounts (student / teacher "Mam"),
+> central progress tracking, teacher-authored Lab Experiments, badges and PDF
+> certificates — all via a client-side Supabase (Postgres + Auth) integration,
+> still deployable as a static site. **See [`SUPABASE_SETUP.md`](SUPABASE_SETUP.md)
+> for the one required dashboard toggle, invite codes, and Vercel deploy steps.**
+
 ---
 
 ## 🌟 Overview & Key Features

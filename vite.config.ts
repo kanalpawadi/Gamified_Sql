@@ -10,6 +10,7 @@ export default defineConfig({
     sourcemap: false,
   },
   server: {
-    port: 3001,
+    port: 5173,
+    strictPort: false,
   }
 });
