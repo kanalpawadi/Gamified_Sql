@@ -179,8 +179,8 @@ function LabSubmissionsTab() {
                     <td>{r.classSection ?? '—'}</td>
                     <td><strong>{r.labTitle}</strong></td>
                     <td>
-                      <span className={`pill ${r.status === 'Completed' ? 'pill-easy' : 'pill-medium'}`}>
-                        {r.status === 'Completed' ? '✓ Completed' : 'In Progress'}
+                      <span className={`pill ${r.status === 'Completed' ? 'pill-easy' : r.status === 'In Progress' ? 'pill-medium' : 'pill-basic'}`}>
+                        {r.status === 'Completed' ? '✓ Completed' : r.status === 'In Progress' ? 'In Progress' : 'Not Started'}
                       </span>
                     </td>
                     <td>{r.solvedCount} / {r.totalQuestions}</td>

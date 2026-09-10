@@ -23,7 +23,7 @@ export interface StudentLabRecord {
   classSection: string | null;
   labId: string;
   labTitle: string;
-  status: 'Completed' | 'In Progress';
+  status: 'Completed' | 'In Progress' | 'Not Started';
   solvedCount: number;
   totalQuestions: number;
   lastSubmittedAt: string | null;
@@ -135,11 +135,13 @@ export async function getStudentLabCompletions(): Promise<StudentLabRecord[]> {
       const solvedCount = passedQuestions.size;
       const totalQuestions = lab.questions.length;
 
-      if (userSubs.length === 0 && solvedCount === 0) {
-        continue;
+      let status: 'Completed' | 'In Progress' | 'Not Started' = 'Not Started';
+      if (totalQuestions > 0 && solvedCount === totalQuestions) {
+        status = 'Completed';
+      } else if (userSubs.length > 0) {
+        status = 'In Progress';
       }
 
-      const status: 'Completed' | 'In Progress' = totalQuestions > 0 && solvedCount === totalQuestions ? 'Completed' : 'In Progress';
       const lastSub = userSubs[0];
 
       records.push({
@@ -160,7 +162,8 @@ export async function getStudentLabCompletions(): Promise<StudentLabRecord[]> {
 
   return records.sort((a, b) => {
     if (a.status === 'Completed' && b.status !== 'Completed') return -1;
-    if (a.status !== 'Completed' && b.status === 'Completed') return 1;
+    if (a.status === 'In Progress' && b.status === 'Not Started') return -1;
+    if (a.status === 'Not Started' && b.status !== 'Not Started') return 1;
     return (b.lastSubmittedAt ?? '').localeCompare(a.lastSubmittedAt ?? '');
   });
 }
