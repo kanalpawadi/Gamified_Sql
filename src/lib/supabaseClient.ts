@@ -1,17 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 
-const url = import.meta.env.VITE_SUPABASE_URL;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const DEFAULT_SUPABASE_URL = 'https://vgbpqdnwrlfuzhmtaqij.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnYnBxZG53cmxmdXpobXRhcWlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NjM5MzYsImV4cCI6MjEwNDUzOTkzNn0.s0HceDJZ43gdUIbGw9xmmBrHVYtTvW-qtuGIe7nLHI0';
 
-if (!url || !anonKey) {
-  // Surfaced early so a missing .env is obvious in dev / on Vercel.
-  console.error(
-    'Missing Supabase env vars. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY ' +
-    '(see .env.example).'
-  );
-}
+const url = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(url ?? '', anonKey ?? '', {
+export const supabase = createClient(url, anonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
