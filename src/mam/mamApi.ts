@@ -53,11 +53,16 @@ export function setLocalApproval(userId: string, isApproved: boolean) {
 }
 
 export function getEffectiveApproval(p: Profile): boolean {
+  // If Supabase DB has is_approved = true, student is approved!
+  if (p.is_approved === true) {
+    return true;
+  }
+  // Check local storage fallback (for Mam dashboard offline/local override)
   const localMap = getLocalApprovals();
   if (p.id in localMap) {
     return localMap[p.id];
   }
-  return p.is_approved === true;
+  return false;
 }
 
 /**
