@@ -16,9 +16,11 @@ const STARTER = '-- Write your SQL query here\n-- Ctrl/Cmd + Enter to execute\n\
 
 export function LabsSection({
   section,
+  isApproved = true,
   onCompletion,
 }: {
   section: string | null;
+  isApproved?: boolean;
   onCompletion?: () => void; // parent refreshes badges/certs after a lab completes
 }) {
   const [labs, setLabs] = useState<LabExperiment[] | null>(null);
@@ -26,7 +28,11 @@ export function LabsSection({
   const [passedByLab, setPassedByLab] = useState<Record<string, Set<string>>>({});
 
   const refreshLabs = useCallback(async () => {
-    const list = await listStudentLabs(section);
+    if (!isApproved) {
+      setLabs([]);
+      return;
+    }
+    const list = await listStudentLabs(section, isApproved);
     setLabs(list);
     // Load passed-state for each lab so the list can show progress.
     const map: Record<string, Set<string>> = {};
@@ -35,9 +41,24 @@ export function LabsSection({
       map[lab.id] = new Set(subs.filter((s) => s.passed).map((s) => s.question_id));
     }
     setPassedByLab(map);
-  }, [section]);
+  }, [section, isApproved]);
 
   useEffect(() => { refreshLabs(); }, [refreshLabs]);
+
+  if (!isApproved) {
+    return (
+      <div className="labs-wrap">
+        <div className="ledger-card card pending-approval-card" style={{ padding: 28, textAlign: 'center', marginTop: 16 }}>
+          <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>🔒</div>
+          <h3 style={{ margin: '0 0 8px 0', fontSize: '1.2rem', fontWeight: 600 }}>Lab Access Restricted</h3>
+          <p className="text-muted text-sm" style={{ maxWidth: 480, margin: '0 auto', lineHeight: 1.5 }}>
+            Only <strong>accepted/approved students</strong> can access and attempt lab tests created by Mam.
+            Please contact your instructor (Mam) to accept your registration from the Teacher Dashboard.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (active) {
     return (

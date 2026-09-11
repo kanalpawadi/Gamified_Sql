@@ -157,11 +157,19 @@ export function LoginView() {
         </form>
 
         <p className="auth-foot">
-          {mode === 'login'
-            ? 'New student? Use the Sign Up tab.'
-            : mode === 'mam' && mamAction === 'login'
-            ? 'Once registered, teachers do not need an invite code to log in.'
-            : 'Progress, badges & certificates sync to your account.'}
+          {mode === 'login' ? (
+            <>
+              New student? Use the Sign Up tab.
+              <br />
+              <span className="text-muted" style={{ fontSize: '0.78rem', display: 'inline-block', marginTop: 4 }}>
+                💡 Forgot password? Please ask Mam (your instructor) to reset your password.
+              </span>
+            </>
+          ) : mode === 'mam' && mamAction === 'login' ? (
+            'Once registered, teachers do not need an invite code to log in.'
+          ) : (
+            'Progress, badges & certificates sync to your account.'
+          )}
         </p>
       </div>
     </div>

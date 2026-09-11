@@ -33,8 +33,9 @@ export function labAssignedToSection(targetSections: string[], section: string |
 
 // ── Student-facing reads ───────────────────────────────────────────────────
 
-/** Published labs assigned to this student's section (empty target => everyone). */
-export async function listStudentLabs(section: string | null): Promise<LabExperiment[]> {
+/** Published labs assigned to this student's section (empty target => everyone). Requires approved student status. */
+export async function listStudentLabs(section: string | null, isApproved: boolean = true): Promise<LabExperiment[]> {
+  if (!isApproved) return [];
   const { data, error } = await supabase
     .from('lab_experiments')
     .select('*')

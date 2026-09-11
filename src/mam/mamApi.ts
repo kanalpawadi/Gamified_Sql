@@ -57,7 +57,7 @@ export function getEffectiveApproval(p: Profile): boolean {
   if (p.id in localMap) {
     return localMap[p.id];
   }
-  return p.is_approved !== false;
+  return p.is_approved === true;
 }
 
 /**
@@ -140,6 +140,36 @@ export async function bulkApprovePendingStudents(
   }
 
   return { success: true, count: successCount };
+}
+
+/**
+ * Resets a student's password manually (Mam only action).
+ */
+export async function resetStudentPassword(
+  userId: string,
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!newPassword || newPassword.length < 6) {
+    return { success: false, error: 'Password must be at least 6 characters long.' };
+  }
+
+  const { error } = await supabase.rpc('reset_student_password', {
+    p_new_password: newPassword,
+    p_target_user_id: userId,
+  });
+
+  if (error) {
+    console.error('resetStudentPassword error:', error.message);
+    if (error.message.includes('schema cache') || error.message.includes('Could not find the function')) {
+      return {
+        success: false,
+        error: `Supabase RPC Error: "${error.message}". Please run migration 0005_reset_student_password.sql in Supabase SQL Editor and reload your browser.`,
+      };
+    }
+    return { success: false, error: error.message.replace(/^.*:\s*/, '') };
+  }
+
+  return { success: true };
 }
 
 /**

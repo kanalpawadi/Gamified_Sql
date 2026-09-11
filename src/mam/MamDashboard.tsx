@@ -7,6 +7,7 @@ import {
   getAllStudentsForApproval,
   setStudentApproval,
   bulkApprovePendingStudents,
+  resetStudentPassword,
 } from './mamApi';
 import type { StudentOverview, StudentLabRecord } from './mamApi';
 import { listMyLabs, setLabPublished, deleteLab } from '../labs/labsApi';
@@ -78,6 +79,154 @@ export function MamDashboard() {
   );
 }
 
+interface ResetStudentInfo {
+  id: string;
+  fullName: string;
+  prn: string | null;
+}
+
+function ResetPasswordModal({
+  student,
+  onClose,
+  onSuccess,
+}: {
+  student: ResetStudentInfo;
+  onClose: () => void;
+  onSuccess: (msg: string) => void;
+}) {
+  const [newPassword, setNewPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const generatePassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+    let pass = 'Pass#';
+    for (let i = 0; i < 5; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setNewPassword(pass);
+    setShowPassword(true);
+    setError(null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+      setError('Password must be at least 6 characters long.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+
+    const res = await resetStudentPassword(student.id, newPassword);
+    setBusy(false);
+
+    if (res.success) {
+      onSuccess(`Password for "${student.fullName}" ${student.prn ? `(${student.prn})` : ''} successfully reset to: ${newPassword}`);
+      onClose();
+    } else {
+      setError(res.error || 'Failed to reset password.');
+    }
+  };
+
+  return (
+    <div
+      className="modal-backdrop"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0, 0, 0, 0.65)',
+        backdropFilter: 'blur(4px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+        padding: 16,
+      }}
+    >
+      <div
+        className="card ledger-card"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%',
+          maxWidth: 440,
+          padding: 24,
+          background: 'var(--card-bg, #1e293b)',
+          borderColor: 'var(--border-color, rgba(255,255,255,0.1))',
+          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 600 }}>🔑 Reset Student Password</h3>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} style={{ padding: '2px 8px' }}>✕</button>
+        </div>
+
+        <p className="text-xs text-muted" style={{ marginBottom: 16, lineHeight: 1.4 }}>
+          Set a new password for student <strong>{student.fullName}</strong>
+          {student.prn ? <code className="mono" style={{ marginLeft: 6 }}>({student.prn})</code> : ''}. The student will log in with this new password.
+        </p>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-12">
+          <label className="auth-field" style={{ display: 'block', marginBottom: 12 }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 500, display: 'block', marginBottom: 6 }}>New Password</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                className="auth-input"
+                style={{ flex: 1, padding: '8px 12px' }}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="At least 6 characters"
+                required
+                minLength={6}
+              />
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowPassword(!showPassword)}
+                title={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? '👁️' : '🙈'}
+              </button>
+            </div>
+          </label>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={generatePassword}
+              style={{ fontSize: '0.8rem', color: 'var(--gold, #d4af37)' }}
+            >
+              🎲 Auto-Generate Password
+            </button>
+          </div>
+
+          {error && (
+            <div className="auth-error" style={{ padding: '8px 12px', fontSize: '0.82rem', marginBottom: 12 }}>
+              ⚠️ {error}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} disabled={busy}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-gold btn-sm" disabled={busy || !newPassword}>
+              {busy ? 'Resetting…' : 'Save New Password'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Student Approvals tab ───────────────────────────────────────────────────
 
 function StudentApprovalsTab({ onStatusChanged }: { onStatusChanged?: () => void }) {
@@ -86,6 +235,7 @@ function StudentApprovalsTab({ onStatusChanged }: { onStatusChanged?: () => void
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [resetTarget, setResetTarget] = useState<ResetStudentInfo | null>(null);
 
   const load = useCallback(async () => {
     setStudents(null);
@@ -151,6 +301,14 @@ function StudentApprovalsTab({ onStatusChanged }: { onStatusChanged?: () => void
 
   return (
     <div className="mam-wrap">
+      {resetTarget && (
+        <ResetPasswordModal
+          student={resetTarget}
+          onClose={() => setResetTarget(null)}
+          onSuccess={(msg) => setMessage({ type: 'success', text: msg })}
+        />
+      )}
+
       <div className="mam-head">
         <div>
           <h2>Student Registration Approvals</h2>
@@ -280,6 +438,15 @@ function StudentApprovalsTab({ onStatusChanged }: { onStatusChanged?: () => void
                             {busyId === s.id ? 'Saving…' : '✕ Reject Access'}
                           </button>
                         )}
+
+                        <button
+                          className="btn btn-sm btn-ghost"
+                          style={{ padding: '3px 10px', fontSize: '0.78rem' }}
+                          onClick={() => setResetTarget({ id: s.id, fullName: s.fullName, prn: s.prn })}
+                          title="Reset password manually for this student"
+                        >
+                          🔑 Reset Pass
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -297,6 +464,8 @@ function StudentApprovalsTab({ onStatusChanged }: { onStatusChanged?: () => void
 
 function StudentsTab({ onNavigateApprovals }: { onNavigateApprovals?: () => void }) {
   const [rows, setRows] = useState<StudentOverview[] | null>(null);
+  const [resetTarget, setResetTarget] = useState<ResetStudentInfo | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const load = useCallback(async () => {
     setRows(null);
@@ -318,6 +487,14 @@ function StudentsTab({ onNavigateApprovals }: { onNavigateApprovals?: () => void
 
   return (
     <div className="mam-wrap">
+      {resetTarget && (
+        <ResetPasswordModal
+          student={resetTarget}
+          onClose={() => setResetTarget(null)}
+          onSuccess={(msg) => setMessage({ type: 'success', text: msg })}
+        />
+      )}
+
       <div className="mam-head">
         <h2>Class Progress Ledger</h2>
         <div className="flex gap-8">
@@ -329,6 +506,24 @@ function StudentsTab({ onNavigateApprovals }: { onNavigateApprovals?: () => void
           <button className="btn btn-ghost btn-sm" onClick={load}>↻ Refresh</button>
         </div>
       </div>
+
+      {message && (
+        <div
+          className={`ledger-card card ${message.type === 'success' ? 'ledger-success' : ''}`}
+          style={{
+            padding: '10px 16px',
+            marginBottom: 16,
+            background: message.type === 'success' ? 'rgba(62, 122, 76, 0.1)' : 'rgba(214, 90, 74, 0.1)',
+            borderColor: message.type === 'success' ? 'var(--success)' : 'var(--error)',
+            color: message.type === 'success' ? '#2b5735' : '#9e3629',
+            fontSize: '0.88rem',
+            fontWeight: 500,
+          }}
+        >
+          {message.type === 'success' ? '✓ ' : '⚠️ '}
+          {message.text}
+        </div>
+      )}
 
       <div className="mam-stat-row">
         <Stat label="Students" value={rows?.length ?? '—'} />
@@ -348,7 +543,7 @@ function StudentsTab({ onNavigateApprovals }: { onNavigateApprovals?: () => void
               <thead>
                 <tr>
                   <th>Status</th><th>Name</th><th>PRN</th><th>Section</th>
-                  <th>Solved</th><th>Mastery</th><th>Labs</th><th>Badges</th><th>Last active</th>
+                  <th>Solved</th><th>Mastery</th><th>Labs</th><th>Badges</th><th>Last active</th><th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -374,6 +569,16 @@ function StudentsTab({ onNavigateApprovals }: { onNavigateApprovals?: () => void
                     <td>{r.labsCompleted}<span className="text-muted"> / {r.labsAssigned}</span></td>
                     <td>🏅 {r.badgeCount}</td>
                     <td className="text-xs text-muted">{r.lastActive ? new Date(r.lastActive).toLocaleDateString() : '—'}</td>
+                    <td>
+                      <button
+                        className="btn btn-sm btn-ghost"
+                        style={{ padding: '3px 10px', fontSize: '0.78rem' }}
+                        onClick={() => setResetTarget({ id: r.id, fullName: r.fullName, prn: r.prn })}
+                        title="Reset password manually for this student"
+                      >
+                        🔑 Reset Pass
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
