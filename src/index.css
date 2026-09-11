@@ -1444,10 +1444,155 @@ button.lab-card { border-width: 1px; }
   margin-bottom: 16px;
 }
 
-/* ── Responsive ──────────────────────────────────────────────────────────────── */
+/* ── Responsive & Mobile Design System ────────────────────────────────────────── */
+
+/* Tablets & Mobile Screens (<= 900px) */
 @media (max-width: 900px) {
-  .lab-solver-grid, .lc-grid { grid-template-columns: 1fr; }
-  .mam-main { height: auto; }
-  .app-header { flex-wrap: wrap; height: auto; min-height: var(--header-h); padding-top: 6px; padding-bottom: 6px; }
+  .app-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+  
+  .panel-left {
+    border-right: none;
+    border-bottom: 2px solid var(--border-strong);
+    overflow-y: visible;
+  }
+
+  .panel-right {
+    overflow-y: visible;
+  }
+
+  .lab-solver-grid, .lc-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mam-main {
+    height: auto;
+    padding: 12px;
+  }
+
+  .app-header {
+    height: auto;
+    min-height: var(--header-h);
+    padding: 8px 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: space-between;
+  }
+
+  .header-question-title {
+    display: none; /* Hide header question subtitle on mobile to save vertical space */
+  }
+
+  .header-right {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .header-right button {
+    padding: 4px 8px;
+    font-size: 0.75rem;
+  }
+
+  .labs-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Mobile Devices (<= 600px) */
+@media (max-width: 600px) {
+  html { font-size: 14px; }
+
+  .app-header {
+    padding: 6px 10px;
+  }
+
+  .header-logo {
+    font-size: 1rem;
+  }
+
+  .auth-screen {
+    padding: 12px;
+  }
+
+  .auth-card {
+    padding: 16px;
+    width: 100%;
+  }
+
+  .auth-tabs {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .auth-tab {
+    flex: 1 1 30%;
+    font-size: 0.75rem;
+    padding: 6px 4px;
+    text-align: center;
+  }
+
+  .mam-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .mam-head .flex {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .mam-stat-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .approvals-filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .approvals-filter-bar .flex {
+    flex-wrap: wrap;
+  }
+
+  .approval-search-input {
+    width: 100%;
+  }
+
+  .mam-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -12px;
+    padding: 0 12px;
+  }
+
+  .mam-table th, .mam-table td {
+    padding: 8px 10px;
+    font-size: 0.8rem;
+  }
+
+  .pending-approval-card {
+    margin: 16px auto;
+    padding: 20px 14px;
+  }
+
+  /* Modal backdrop for mobile */
+  .modal-backdrop > div {
+    width: 95% !important;
+    padding: 16px !important;
+  }
+}
+
+/* Extra Small Screens (<= 380px) */
+@media (max-width: 380px) {
+  .mam-stat-row {
+    grid-template-columns: 1fr;
+  }
 }
 
