@@ -31,6 +31,10 @@ async function fetchProfile(id: string, retries = 4): Promise<Profile | null> {
       .maybeSingle();
     if (data) {
       const prof = data as Profile;
+      if (prof.role === 'student') {
+        // On student devices, clear local approvals map so database is 100% source of truth
+        try { localStorage.removeItem('sqlquest_student_approvals'); } catch {}
+      }
       prof.is_approved = getEffectiveApproval(prof);
       return prof;
     }
