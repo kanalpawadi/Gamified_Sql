@@ -570,7 +570,7 @@ export function StudentApp() {
         <main className="mam-main" role="main">
           <LabsSection
             section={profile?.class_section ?? null}
-            isApproved={profile?.is_approved !== false}
+            isApproved={profile?.is_approved === true}
             onCompletion={() => {
               setCertToast('Lab completed — badge & certificate awarded!');
               setTimeout(() => setCertToast(null), 6000);

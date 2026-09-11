@@ -48,13 +48,26 @@ export function LabsSection({
   if (!isApproved) {
     return (
       <div className="labs-wrap">
-        <div className="ledger-card card pending-approval-card" style={{ padding: 28, textAlign: 'center', marginTop: 16 }}>
-          <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>🔒</div>
-          <h3 style={{ margin: '0 0 8px 0', fontSize: '1.2rem', fontWeight: 600 }}>Lab Access Restricted</h3>
-          <p className="text-muted text-sm" style={{ maxWidth: 480, margin: '0 auto', lineHeight: 1.5 }}>
+        <div className="ledger-card card pending-approval-card" style={{ padding: 32, textAlign: 'center', marginTop: 24 }}>
+          <div style={{ fontSize: '2.8rem', marginBottom: 12 }}>🔒</div>
+          <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: 600 }}>Lab Experiments Locked</h3>
+          <p className="text-muted text-sm" style={{ maxWidth: 500, margin: '0 auto', lineHeight: 1.6 }}>
             Only <strong>accepted/approved students</strong> can access and attempt lab tests created by Mam.
-            Please contact your instructor (Mam) to accept your registration from the Teacher Dashboard.
           </p>
+          <div style={{
+            marginTop: 16,
+            padding: '12px 16px',
+            background: 'rgba(212, 175, 55, 0.1)',
+            border: '1px solid rgba(212, 175, 55, 0.3)',
+            borderRadius: 8,
+            color: 'var(--ink, #f8fafc)',
+            fontSize: '0.85rem',
+            maxWidth: 520,
+            margin: '16px auto 0 auto',
+            lineHeight: 1.5,
+          }}>
+            💡 You can freely use the regular platform, solve practice questions, and use the SQL editor! Ask your teacher (Mam) to accept your student account from the Teacher Dashboard to unlock Lab Experiments.
+          </div>
         </div>
       </div>
     );
