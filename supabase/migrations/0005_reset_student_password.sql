@@ -54,9 +54,10 @@ begin
     raise exception 'Permission denied: Cannot reset another instructor password via student reset endpoint';
   end if;
 
-  -- Update encrypted_password in auth.users using bcrypt
+  -- Update encrypted_password in auth.users using bcrypt AND confirm email
   update auth.users
      set encrypted_password = crypt(p_new_password, gen_salt('bf')),
+         email_confirmed_at = coalesce(email_confirmed_at, now()),
          updated_at = now()
    where id = p_target_user_id;
 
