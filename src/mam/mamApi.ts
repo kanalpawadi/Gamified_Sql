@@ -238,6 +238,7 @@ export async function getStudentsOverview(): Promise<StudentOverview[]> {
         lastActive: p.last_active ?? null,
       };
     })
+    .filter((s) => s.isApproved) // Only show accepted/approved students in Class Ledger
     .sort((a, b) => b.solved - a.solved);
 }
 
@@ -254,7 +255,7 @@ export async function getStudentLabCompletions(): Promise<StudentLabRecord[]> {
     return [];
   }
 
-  const profiles = (profilesRes.data ?? []) as Profile[];
+  const approvedProfiles = ((profilesRes.data ?? []) as Profile[]).filter((p) => getEffectiveApproval(p));
   const labs = (labsRes.data ?? []) as LabExperiment[];
   const subs = (subsRes.data ?? []) as LabSubmission[];
 
@@ -267,7 +268,7 @@ export async function getStudentLabCompletions(): Promise<StudentLabRecord[]> {
 
   const records: StudentLabRecord[] = [];
 
-  for (const p of profiles) {
+  for (const p of approvedProfiles) {
     for (const lab of labs) {
       if (!labAssignedToSection(lab.target_sections, p.class_section)) {
         continue;
