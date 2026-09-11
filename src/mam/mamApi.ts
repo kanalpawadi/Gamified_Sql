@@ -93,13 +93,13 @@ export async function setStudentApproval(
   userId: string,
   isApproved: boolean
 ): Promise<{ success: boolean; note?: string; error?: string }> {
-  // Always update local storage first so the UI works seamlessly
+  // Always update local storage first so the UI works seamlessly on this device
   setLocalApproval(userId, isApproved);
 
-  // Try RPC first
+  // Try RPC with PostgREST alphabetical parameter names first
   const rpcRes = await supabase.rpc('set_student_approval', {
-    p_target_user_id: userId,
     p_is_approved: isApproved,
+    p_target_user_id: userId,
   });
 
   if (!rpcRes.error) {
@@ -113,10 +113,10 @@ export async function setStudentApproval(
     .eq('id', userId);
 
   if (updateRes.error) {
-    console.warn('Supabase DB update warning (falling back to local state):', updateRes.error.message);
+    console.warn('Supabase DB update warning:', updateRes.error.message);
     return {
-      success: true,
-      note: 'Saved in local dashboard state. Run 0004_student_approval.sql in Supabase SQL Editor for multi-device sync.',
+      success: false,
+      error: updateRes.error.message,
     };
   }
 

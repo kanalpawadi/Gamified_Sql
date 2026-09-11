@@ -70,12 +70,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const prof = await fetchProfile(data.session.user.id);
         if (!active) return;
         setProfile(prof);
-        if (!prof) {
-          console.warn('No profile row found for user session, signing out stale session.');
-          await supabase.auth.signOut();
-          setSession(null);
-          lastUserId.current = null;
-        }
       }
       setInitializing(false);
     }).catch((err) => {
@@ -87,18 +81,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!active) return;
       setSession(s);
       const uid = s?.user?.id ?? null;
-      if (uid && uid !== lastUserId.current) {
+      if (uid) {
         lastUserId.current = uid;
         const prof = await fetchProfile(uid);
         if (!active) return;
         setProfile(prof);
-        if (!prof) {
-          console.warn('No profile row found for new user session.');
-          await supabase.auth.signOut();
-          setSession(null);
-          lastUserId.current = null;
-        }
-      } else if (!uid) {
+      } else {
         lastUserId.current = null;
         setProfile(null);
       }
