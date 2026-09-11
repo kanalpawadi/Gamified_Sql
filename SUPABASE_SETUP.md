@@ -32,6 +32,7 @@ provider is on.
   - `0001_init.sql` — tables, `is_mam()`, signup trigger, `redeem_mam_invite()`, RLS, seed invite codes.
   - `0002_prevent_role_change.sql` — blocks students from self-promoting to teacher.
   - `0003_grants.sql` — explicit table/sequence grants for `anon` / `authenticated`.
+  - `0004_student_approval.sql` — adds `is_approved` column to profiles and `set_student_approval()` RPC.
 - **`.env`** is filled in with your project URL + anon key (git-ignored). See
   `.env.example` for the shape. On a fresh checkout, copy and fill it.
 - **Dependencies** `@supabase/supabase-js` and `jspdf` are installed.

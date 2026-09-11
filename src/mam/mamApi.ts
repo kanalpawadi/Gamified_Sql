@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabaseClient';
-import type { Profile, LabExperiment, LabSubmission } from '../lib/types';
+import type { Profile, LabExperiment, LabSubmission, StudentApprovalRecord } from '../lib/types';
 import { labAssignedToSection } from '../labs/labsApi';
 
 export interface StudentOverview {
@@ -7,6 +7,7 @@ export interface StudentOverview {
   fullName: string;
   prn: string | null;
   classSection: string | null;
+  isApproved: boolean;
   solved: number;       // distinct questions passed
   attempted: number;    // distinct questions attempted
   mastery: number;      // solved / attempted (0..1)
@@ -28,6 +29,117 @@ export interface StudentLabRecord {
   totalQuestions: number;
   lastSubmittedAt: string | null;
   latestSql: string | null;
+}
+
+const APPROVALS_KEY = 'sqlquest_student_approvals';
+
+export function getLocalApprovals(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(APPROVALS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setLocalApproval(userId: string, isApproved: boolean) {
+  try {
+    const map = getLocalApprovals();
+    map[userId] = isApproved;
+    localStorage.setItem(APPROVALS_KEY, JSON.stringify(map));
+  } catch (e) {
+    console.error('setLocalApproval error:', e);
+  }
+}
+
+export function getEffectiveApproval(p: Profile): boolean {
+  const localMap = getLocalApprovals();
+  if (p.id in localMap) {
+    return localMap[p.id];
+  }
+  return p.is_approved !== false;
+}
+
+/**
+ * Fetches all student profiles for approval management.
+ */
+export async function getAllStudentsForApproval(): Promise<StudentApprovalRecord[]> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('role', 'student')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('getAllStudentsForApproval error:', error.message);
+    return [];
+  }
+
+  return (data ?? []).map((p: Profile) => ({
+    id: p.id,
+    fullName: p.full_name || '(no name)',
+    prn: p.prn,
+    classSection: p.class_section,
+    isApproved: getEffectiveApproval(p),
+    createdAt: p.created_at,
+    lastActive: p.last_active ?? null,
+  }));
+}
+
+/**
+ * Sets a student's approval status (true = approved/accepted, false = rejected/pending).
+ */
+export async function setStudentApproval(
+  userId: string,
+  isApproved: boolean
+): Promise<{ success: boolean; note?: string; error?: string }> {
+  // Always update local storage first so the UI works seamlessly
+  setLocalApproval(userId, isApproved);
+
+  // Try RPC first
+  const rpcRes = await supabase.rpc('set_student_approval', {
+    p_target_user_id: userId,
+    p_is_approved: isApproved,
+  });
+
+  if (!rpcRes.error) {
+    return { success: true };
+  }
+
+  // Fallback to direct update if RPC is missing or fails
+  const updateRes = await supabase
+    .from('profiles')
+    .update({ is_approved: isApproved })
+    .eq('id', userId);
+
+  if (updateRes.error) {
+    console.warn('Supabase DB update warning (falling back to local state):', updateRes.error.message);
+    return {
+      success: true,
+      note: 'Saved in local dashboard state. Run 0004_student_approval.sql in Supabase SQL Editor for multi-device sync.',
+    };
+  }
+
+  return { success: true };
+}
+
+
+
+/**
+ * Bulk approves multiple student accounts.
+ */
+export async function bulkApprovePendingStudents(
+  userIds: string[]
+): Promise<{ success: boolean; count: number; error?: string }> {
+  if (userIds.length === 0) return { success: true, count: 0 };
+
+  let successCount = 0;
+  for (const uid of userIds) {
+    const res = await setStudentApproval(uid, true);
+    if (res.success) successCount++;
+  }
+
+  return { success: true, count: successCount };
 }
 
 /**
@@ -86,6 +198,7 @@ export async function getStudentsOverview(): Promise<StudentOverview[]> {
         fullName: p.full_name || '(no name)',
         prn: p.prn,
         classSection: p.class_section,
+        isApproved: getEffectiveApproval(p),
         solved,
         attempted,
         mastery: attempted === 0 ? 0 : solved / attempted,
@@ -97,6 +210,7 @@ export async function getStudentsOverview(): Promise<StudentOverview[]> {
     })
     .sort((a, b) => b.solved - a.solved);
 }
+
 
 export async function getStudentLabCompletions(): Promise<StudentLabRecord[]> {
   const [profilesRes, labsRes, subsRes] = await Promise.all([

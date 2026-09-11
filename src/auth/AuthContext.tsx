@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, prnToEmail, normalizePrn } from '../lib/supabaseClient';
 import type { Profile } from '../lib/types';
+import { getEffectiveApproval } from '../mam/mamApi';
 
 interface AuthResult { error?: string }
 
@@ -28,7 +29,11 @@ async function fetchProfile(id: string, retries = 4): Promise<Profile | null> {
       .select('*')
       .eq('id', id)
       .maybeSingle();
-    if (data) return data as Profile;
+    if (data) {
+      const prof = data as Profile;
+      prof.is_approved = getEffectiveApproval(prof);
+      return prof;
+    }
     if (error) console.error('fetchProfile:', error.message);
     // Profile is created by a DB trigger right after signup — brief retry.
     await new Promise((r) => setTimeout(r, 350));

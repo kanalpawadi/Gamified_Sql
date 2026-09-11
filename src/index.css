@@ -1375,9 +1375,79 @@ button.lab-card { border-width: 1px; }
 .mam-name { font-weight: 600; color: var(--ink); }
 .mam-mastery { display: flex; align-items: center; gap: 8px; }
 
+/* ── Approval Status Pills & Controls ────────────────────────────────────────── */
+.pill-approved {
+  background: rgba(62, 122, 76, 0.15);
+  color: #2b5735;
+  border: 1px solid rgba(62, 122, 76, 0.3);
+}
+
+.pill-pending {
+  background: rgba(201, 162, 39, 0.18);
+  color: #8c6e10;
+  border: 1px solid rgba(201, 162, 39, 0.4);
+}
+
+.pill-rejected {
+  background: rgba(214, 90, 74, 0.15);
+  color: #9e3629;
+  border: 1px solid rgba(214, 90, 74, 0.3);
+}
+
+.badge-counter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--error);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  margin-left: 5px;
+  min-width: 18px;
+  line-height: 1.2;
+}
+
+.approvals-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.approval-search-input {
+  padding: 7px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 0.86rem;
+  width: 260px;
+  background: var(--panel);
+  color: var(--ink);
+}
+.approval-search-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-10);
+}
+
+.pending-approval-card {
+  max-width: 520px;
+  margin: 40px auto;
+  text-align: center;
+  padding: 32px 24px;
+}
+.pending-approval-icon {
+  font-size: 3.5rem;
+  margin-bottom: 16px;
+}
+
 /* ── Responsive ──────────────────────────────────────────────────────────────── */
 @media (max-width: 900px) {
   .lab-solver-grid, .lc-grid { grid-template-columns: 1fr; }
   .mam-main { height: auto; }
   .app-header { flex-wrap: wrap; height: auto; min-height: var(--header-h); padding-top: 6px; padding-bottom: 6px; }
 }
+

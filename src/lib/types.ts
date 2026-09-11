@@ -9,9 +9,21 @@ export interface Profile {
   prn: string | null;
   full_name: string;
   class_section: string | null;
+  is_approved?: boolean;
   created_at: string;
   last_active: string;
 }
+
+export interface StudentApprovalRecord {
+  id: string;
+  fullName: string;
+  prn: string | null;
+  classSection: string | null;
+  isApproved: boolean;
+  createdAt: string;
+  lastActive: string | null;
+}
+
 
 // A single question inside a lab experiment (stored in lab_experiments.questions jsonb).
 export interface LabQuestion {

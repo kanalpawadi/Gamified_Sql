@@ -1,14 +1,31 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { getStudentsOverview, getStudentLabCompletions, exportLabCompletionsCSV } from './mamApi';
+import {
+  getStudentsOverview,
+  getStudentLabCompletions,
+  exportLabCompletionsCSV,
+  getAllStudentsForApproval,
+  setStudentApproval,
+  bulkApprovePendingStudents,
+} from './mamApi';
 import type { StudentOverview, StudentLabRecord } from './mamApi';
 import { listMyLabs, setLabPublished, deleteLab } from '../labs/labsApi';
-import type { LabExperiment } from '../lib/types';
+import type { LabExperiment, StudentApprovalRecord } from '../lib/types';
 import { LabCreator } from './LabCreator';
 
 export function MamDashboard() {
   const { profile, signOut } = useAuth();
-  const [tab, setTab] = useState<'students' | 'submissions' | 'labs'>('students');
+  const [tab, setTab] = useState<'students' | 'approvals' | 'submissions' | 'labs'>('students');
+  const [pendingCount, setPendingCount] = useState<number>(0);
+
+  const checkPendingCount = useCallback(async () => {
+    const list = await getAllStudentsForApproval();
+    setPendingCount(list.filter((s) => !s.isApproved).length);
+  }, []);
+
+  useEffect(() => {
+    checkPendingCount();
+  }, [checkPendingCount, tab]);
 
   return (
     <>
@@ -17,16 +34,40 @@ export function MamDashboard() {
         <div className="header-sep" aria-hidden />
         <span className="header-question-title">Teacher Dashboard · {profile?.full_name}</span>
         <div className="header-right">
-          <button className={`btn btn-sm ${tab === 'students' ? 'btn-gold' : 'btn-ghost-inv'}`} onClick={() => setTab('students')}>👥 Students</button>
-          <button className={`btn btn-sm ${tab === 'submissions' ? 'btn-gold' : 'btn-ghost-inv'}`} onClick={() => setTab('submissions')}>📊 Lab Submissions</button>
-          <button className={`btn btn-sm ${tab === 'labs' ? 'btn-gold' : 'btn-ghost-inv'}`} onClick={() => setTab('labs')}>🧪 Labs</button>
+          <button
+            className={`btn btn-sm ${tab === 'students' ? 'btn-gold' : 'btn-ghost-inv'}`}
+            onClick={() => setTab('students')}
+          >
+            👥 Class Ledger
+          </button>
+          <button
+            className={`btn btn-sm ${tab === 'approvals' ? 'btn-gold' : 'btn-ghost-inv'}`}
+            onClick={() => setTab('approvals')}
+          >
+            ✅ Accept Students
+            {pendingCount > 0 && <span className="badge-counter">{pendingCount}</span>}
+          </button>
+          <button
+            className={`btn btn-sm ${tab === 'submissions' ? 'btn-gold' : 'btn-ghost-inv'}`}
+            onClick={() => setTab('submissions')}
+          >
+            📊 Submissions
+          </button>
+          <button
+            className={`btn btn-sm ${tab === 'labs' ? 'btn-gold' : 'btn-ghost-inv'}`}
+            onClick={() => setTab('labs')}
+          >
+            🧪 Labs
+          </button>
           <button className="btn btn-ghost-inv btn-sm" onClick={signOut}>Sign out</button>
         </div>
       </header>
 
       <main className="mam-main" role="main">
         {tab === 'students' ? (
-          <StudentsTab />
+          <StudentsTab onNavigateApprovals={() => setTab('approvals')} />
+        ) : tab === 'approvals' ? (
+          <StudentApprovalsTab onStatusChanged={checkPendingCount} />
         ) : tab === 'submissions' ? (
           <LabSubmissionsTab />
         ) : (
@@ -37,9 +78,224 @@ export function MamDashboard() {
   );
 }
 
+// ── Student Approvals tab ───────────────────────────────────────────────────
+
+function StudentApprovalsTab({ onStatusChanged }: { onStatusChanged?: () => void }) {
+  const [students, setStudents] = useState<StudentApprovalRecord[] | null>(null);
+  const [filter, setFilter] = useState<'all' | 'pending' | 'approved'>('all');
+  const [search, setSearch] = useState('');
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const load = useCallback(async () => {
+    setStudents(null);
+    const data = await getAllStudentsForApproval();
+    setStudents(data);
+    if (onStatusChanged) onStatusChanged();
+  }, [onStatusChanged]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleSetApproval = async (student: StudentApprovalRecord, isApproved: boolean) => {
+    setBusyId(student.id);
+    setMessage(null);
+    const res = await setStudentApproval(student.id, isApproved);
+    setBusyId(null);
+    if (res.success) {
+      setMessage({
+        type: 'success',
+        text: `Student "${student.fullName}" has been ${isApproved ? 'accepted/approved' : 'rejected'}.`,
+      });
+      load();
+    } else {
+      setMessage({ type: 'error', text: res.error || 'Failed to update approval status.' });
+    }
+  };
+
+  const handleApproveAllPending = async () => {
+    if (!students) return;
+    const pendingList = students.filter((s) => !s.isApproved);
+    if (pendingList.length === 0) return;
+
+    if (!confirm(`Are you sure you want to approve all ${pendingList.length} pending student accounts?`)) return;
+
+    setBusyId('bulk');
+    setMessage(null);
+    const res = await bulkApprovePendingStudents(pendingList.map((s) => s.id));
+    setBusyId(null);
+
+    if (res.success) {
+      setMessage({ type: 'success', text: `Successfully approved ${res.count} pending students.` });
+      load();
+    } else {
+      setMessage({ type: 'error', text: res.error || 'Failed to bulk approve students.' });
+    }
+  };
+
+  const pendingCount = students?.filter((s) => !s.isApproved).length ?? 0;
+  const approvedCount = students?.filter((s) => s.isApproved).length ?? 0;
+  const totalCount = students?.length ?? 0;
+
+  const filtered = students?.filter((s) => {
+    if (filter === 'pending' && s.isApproved) return false;
+    if (filter === 'approved' && !s.isApproved) return false;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      const matchName = s.fullName.toLowerCase().includes(q);
+      const matchPrn = (s.prn ?? '').toLowerCase().includes(q);
+      const matchSec = (s.classSection ?? '').toLowerCase().includes(q);
+      return matchName || matchPrn || matchSec;
+    }
+    return true;
+  });
+
+  return (
+    <div className="mam-wrap">
+      <div className="mam-head">
+        <div>
+          <h2>Student Registration Approvals</h2>
+          <p className="text-xs text-muted" style={{ marginTop: 2 }}>
+            Review, accept, or reject student access to SQLQuest labs and problem sets.
+          </p>
+        </div>
+        <div className="flex gap-8">
+          <button className="btn btn-ghost btn-sm" onClick={load}>↻ Refresh</button>
+          {pendingCount > 0 && (
+            <button
+              className="btn btn-gold btn-sm"
+              onClick={handleApproveAllPending}
+              disabled={busyId === 'bulk'}
+            >
+              {busyId === 'bulk' ? 'Approving…' : `✓ Accept All Pending (${pendingCount})`}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {message && (
+        <div
+          className={`ledger-card card ${message.type === 'success' ? 'ledger-success' : ''}`}
+          style={{
+            padding: '10px 16px',
+            marginBottom: 16,
+            background: message.type === 'success' ? 'rgba(62, 122, 76, 0.1)' : 'rgba(214, 90, 74, 0.1)',
+            borderColor: message.type === 'success' ? 'var(--success)' : 'var(--error)',
+            color: message.type === 'success' ? '#2b5735' : '#9e3629',
+            fontSize: '0.88rem',
+            fontWeight: 500,
+          }}
+        >
+          {message.type === 'success' ? '✓ ' : '⚠️ '}
+          {message.text}
+        </div>
+      )}
+
+      <div className="mam-stat-row">
+        <Stat label="Total Registered" value={totalCount} />
+        <Stat label="Approved Students" value={approvedCount} />
+        <Stat label="Pending Approval" value={pendingCount} />
+      </div>
+
+      <div className="approvals-filter-bar flex gap-12 align-center justify-between" style={{ marginBottom: 14 }}>
+        <div className="flex gap-8">
+          <button
+            className={`btn btn-sm ${filter === 'all' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setFilter('all')}
+          >
+            All Students ({totalCount})
+          </button>
+          <button
+            className={`btn btn-sm ${filter === 'pending' ? 'btn-gold' : 'btn-ghost'}`}
+            onClick={() => setFilter('pending')}
+          >
+            ⏳ Pending ({pendingCount})
+          </button>
+          <button
+            className={`btn btn-sm ${filter === 'approved' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setFilter('approved')}
+          >
+            ✓ Approved ({approvedCount})
+          </button>
+        </div>
+
+        <input
+          type="text"
+          className="approval-search-input"
+          placeholder="🔍 Search name, PRN, section…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
+      <div className="ledger-card card">
+        <div className="mam-table-wrap">
+          {students === null ? (
+            <div style={{ padding: 24 }}><div className="loading-spinner" /></div>
+          ) : filtered?.length === 0 ? (
+            <p className="text-muted" style={{ padding: 20 }}>No student records found matching filter.</p>
+          ) : (
+            <table className="mam-table">
+              <thead>
+                <tr>
+                  <th>Student Name</th>
+                  <th>PRN / ID</th>
+                  <th>Section</th>
+                  <th>Registered Date</th>
+                  <th>Approval Status</th>
+                  <th>Action / Accept</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered?.map((s) => (
+                  <tr key={s.id}>
+                    <td className="mam-name">{s.fullName}</td>
+                    <td className="mono">{s.prn ?? '—'}</td>
+                    <td>{s.classSection ?? '—'}</td>
+                    <td className="text-xs text-muted">
+                      {s.createdAt ? new Date(s.createdAt).toLocaleDateString() : '—'}
+                    </td>
+                    <td>
+                      <span className={`pill ${s.isApproved ? 'pill-approved' : 'pill-pending'}`}>
+                        {s.isApproved ? '✓ Approved Student' : '⏳ Pending Approval'}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="flex gap-8">
+                        {!s.isApproved ? (
+                          <button
+                            className="btn btn-sm btn-gold"
+                            style={{ padding: '3px 10px', fontSize: '0.78rem' }}
+                            disabled={busyId === s.id}
+                            onClick={() => handleSetApproval(s, true)}
+                          >
+                            {busyId === s.id ? 'Saving…' : '✓ Accept as Student'}
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-sm btn-ghost"
+                            style={{ padding: '3px 10px', fontSize: '0.78rem', color: 'var(--error)' }}
+                            disabled={busyId === s.id}
+                            onClick={() => handleSetApproval(s, false)}
+                          >
+                            {busyId === s.id ? 'Saving…' : '✕ Reject Access'}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Students tab ───────────────────────────────────────────────────────────
 
-function StudentsTab() {
+function StudentsTab({ onNavigateApprovals }: { onNavigateApprovals?: () => void }) {
   const [rows, setRows] = useState<StudentOverview[] | null>(null);
 
   const load = useCallback(async () => {
@@ -58,11 +314,18 @@ function StudentsTab() {
     { solved: 0, labs: 0, badges: 0 }
   );
 
+  const pendingCount = rows?.filter((r) => !r.isApproved).length ?? 0;
+
   return (
     <div className="mam-wrap">
       <div className="mam-head">
-        <h2>Class Progress</h2>
+        <h2>Class Progress Ledger</h2>
         <div className="flex gap-8">
+          {pendingCount > 0 && onNavigateApprovals && (
+            <button className="btn btn-gold btn-sm" onClick={onNavigateApprovals}>
+              ⏳ {pendingCount} Student{pendingCount > 1 ? 's' : ''} Pending Approval
+            </button>
+          )}
           <button className="btn btn-ghost btn-sm" onClick={load}>↻ Refresh</button>
         </div>
       </div>
@@ -84,13 +347,18 @@ function StudentsTab() {
             <table className="mam-table">
               <thead>
                 <tr>
-                  <th>Name</th><th>PRN</th><th>Section</th>
+                  <th>Status</th><th>Name</th><th>PRN</th><th>Section</th>
                   <th>Solved</th><th>Mastery</th><th>Labs</th><th>Badges</th><th>Last active</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.id}>
+                    <td>
+                      <span className={`pill ${r.isApproved ? 'pill-approved' : 'pill-pending'}`}>
+                        {r.isApproved ? 'Approved' : 'Pending'}
+                      </span>
+                    </td>
                     <td className="mam-name">{r.fullName}</td>
                     <td className="mono">{r.prn ?? '—'}</td>
                     <td>{r.classSection ?? '—'}</td>
@@ -116,6 +384,7 @@ function StudentsTab() {
     </div>
   );
 }
+
 
 // ── Lab Submissions & CSV Export ──────────────────────────────────────────
 
