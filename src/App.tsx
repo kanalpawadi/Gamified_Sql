@@ -584,6 +584,7 @@ export function StudentApp() {
         <main className="mam-main" role="main">
           <CertificatesSection
             fullName={profile?.full_name ?? 'Student'}
+            prn={profile?.prn}
             completedByCategory={completedByCategory}
           />
         </main>

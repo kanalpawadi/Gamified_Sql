@@ -6,9 +6,11 @@ import { generateCertificatePdf } from './generateCertificate';
 
 export function CertificatesSection({
   fullName,
+  prn,
   completedByCategory,
 }: {
   fullName: string;
+  prn?: string | null;
   completedByCategory: { basic: number; intermediate: number; advanced: number };
 }) {
   const [certs, setCerts] = useState<CertificateRow[] | null>(null);
@@ -47,6 +49,7 @@ export function CertificatesSection({
                   className="btn btn-gold btn-sm"
                   onClick={() => generateCertificatePdf({
                     recipientName: fullName,
+                    prn: prn,
                     title: c.title,
                     certType: c.cert_type,
                     issuedAt: c.issued_at,

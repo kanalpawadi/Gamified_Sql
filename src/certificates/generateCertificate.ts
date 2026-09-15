@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf';
+import QRCode from 'qrcode';
 import type { CertType } from '../lib/types';
 
 // Design tokens (RGB) — mirrors src/index.css :root
@@ -28,13 +29,14 @@ function subtitleFor(certType: CertType, title: string): string {
   }
 }
 
-export function generateCertificatePdf(params: {
+export async function generateCertificatePdf(params: {
   recipientName: string;
+  prn?: string | null;
   title: string;
   certType: CertType;
   issuedAt: string; // ISO date
-}): void {
-  const { recipientName, title, certType, issuedAt } = params;
+}): Promise<void> {
+  const { recipientName, prn, title, certType, issuedAt } = params;
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
@@ -60,16 +62,23 @@ export function generateCertificatePdf(params: {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
   textC(MUTED);
-  doc.text('CERTIFICATE OF ACHIEVEMENT', cx, 96, { align: 'center', charSpace: 3 });
+  doc.text('CERTIFICATE OF ACHIEVEMENT', cx, 96, { align: 'center' });
 
-  // ── Brand ───────────────────────────────────────────────────
+  // ── Brand (SQLQuestByKP centered together) ──────────────────
   doc.setFont('times', 'bold');
   doc.setFontSize(30);
+  const brand1 = 'SQLQuest';
+  const brand2 = 'ByKP';
+  const w1 = doc.getTextWidth(brand1);
+  const w2 = doc.getTextWidth(brand2);
+  const gap = 4;
+  const totalBrandW = w1 + gap + w2;
+  const brandStartX = cx - totalBrandW / 2;
+
   textC(PRIMARY);
-  doc.text('SQLQuest', cx, 138, { align: 'center' });
+  doc.text(brand1, brandStartX, 138);
   textC(GOLD);
-  const brandW = doc.getTextWidth('SQLQuest');
-  doc.text('ByKP', cx + brandW / 2 + 6, 138, { align: 'left' });
+  doc.text(brand2, brandStartX + w1 + gap, 138);
 
   // ── "This certifies that" ──────────────────────────────────
   doc.setFont('helvetica', 'normal');
@@ -101,23 +110,46 @@ export function generateCertificatePdf(params: {
   doc.setFont('times', 'bold');
   doc.setFontSize(30);
   textC(SUCCESS);
-  doc.text(title, cx, 372, { align: 'center', maxWidth: W - 160 });
+  doc.text(title, cx, 365, { align: 'center', maxWidth: W - 160 });
 
-  // ── Footer: issue date + seal line ─────────────────────────
+  // ── Bottom section: QR Code with Student details ────────────
+  const studentNameStr = recipientName || 'Student';
+  const prnStr = prn ? prn.trim() : 'N/A';
+  const qrContent = `Name: ${studentNameStr}\nPRN: ${prnStr}`;
+
+  try {
+    const qrDataUrl = await QRCode.toDataURL(qrContent, {
+      margin: 1,
+      width: 250,
+      color: {
+        dark: '#1F1B16',
+        light: '#FAF6EF',
+      },
+    });
+
+    const qrSize = 85;
+    const qrX = cx - qrSize / 2;
+    const qrY = H - 150;
+
+    doc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
+
+    // Label under QR
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    textC(MUTED);
+    doc.text('Scan for Student Details', cx, qrY + qrSize + 14, { align: 'center' });
+  } catch (err) {
+    console.error('Failed to generate QR code for certificate:', err);
+  }
+
+  // Issue date string at bottom center
   const dateStr = new Date(issuedAt).toLocaleDateString(undefined, {
     year: 'numeric', month: 'long', day: 'numeric',
   });
-
-  drawC(MUTED);
-  doc.setLineWidth(0.75);
-  doc.line(cx - 150, H - 96, cx - 30, H - 96);
-  doc.line(cx + 30, H - 96, cx + 150, H - 96);
-
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
+  doc.setFontSize(9);
   textC(MUTED);
-  doc.text(`Issued ${dateStr}`, cx - 90, H - 82, { align: 'center' });
-  doc.text('SQLQuestByKP', cx + 90, H - 82, { align: 'center' });
+  doc.text(`Issued: ${dateStr}`, cx, H - 38, { align: 'center' });
 
   const fileSafe = title.replace(/[^\w]+/g, '_').replace(/^_+|_+$/g, '');
   doc.save(`SQLQuest_${fileSafe}.pdf`);
