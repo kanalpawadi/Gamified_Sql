@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import {
   getStudentsOverview,
@@ -595,6 +595,9 @@ function StudentsTab({ onNavigateApprovals }: { onNavigateApprovals?: () => void
 
 function LabSubmissionsTab() {
   const [records, setRecords] = useState<StudentLabRecord[] | null>(null);
+  const [selectedLabId, setSelectedLabId] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<'active' | 'completed' | 'in_progress' | 'all'>('active');
+  const [search, setSearch] = useState<string>('');
 
   const load = useCallback(async () => {
     setRecords(null);
@@ -603,34 +606,180 @@ function LabSubmissionsTab() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Unique list of labs present in records
+  const labsList = useMemo(() => {
+    if (!records) return [];
+    const map = new Map<string, string>();
+    for (const r of records) {
+      if (r.labId && r.labTitle) {
+        map.set(r.labId, r.labTitle);
+      }
+    }
+    return Array.from(map.entries()).map(([id, title]) => ({ id, title }));
+  }, [records]);
+
+  // Filter records based on selected experiment, status filter, and search text
+  const filteredRecords = useMemo(() => {
+    if (!records) return [];
+    return records.filter((r) => {
+      // 1. Filter by experiment / lab
+      if (selectedLabId !== 'all' && r.labId !== selectedLabId) {
+        return false;
+      }
+      // 2. Filter by completion status
+      if (statusFilter === 'active' && r.status === 'Not Started') {
+        return false;
+      }
+      if (statusFilter === 'completed' && r.status !== 'Completed') {
+        return false;
+      }
+      if (statusFilter === 'in_progress' && r.status !== 'In Progress') {
+        return false;
+      }
+      // 3. Filter by search query
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const matchName = r.fullName.toLowerCase().includes(q);
+        const matchPrn = (r.prn ?? '').toLowerCase().includes(q);
+        const matchSec = (r.classSection ?? '').toLowerCase().includes(q);
+        const matchLab = r.labTitle.toLowerCase().includes(q);
+        return matchName || matchPrn || matchSec || matchLab;
+      }
+      return true;
+    });
+  }, [records, selectedLabId, statusFilter, search]);
+
+  // Calculated metrics for selected experiment
+  const stats = useMemo(() => {
+    const labRecords = records?.filter((r) => selectedLabId === 'all' || r.labId === selectedLabId) ?? [];
+    const completed = labRecords.filter((r) => r.status === 'Completed').length;
+    const inProgress = labRecords.filter((r) => r.status === 'In Progress').length;
+    const active = completed + inProgress;
+    const notStarted = labRecords.filter((r) => r.status === 'Not Started').length;
+    const total = labRecords.length;
+    const rate = active > 0 ? Math.round((completed / active) * 100) : 0;
+    return { completed, inProgress, active, notStarted, total, rate };
+  }, [records, selectedLabId]);
+
+  const selectedLabObj = labsList.find((l) => l.id === selectedLabId);
+  const selectedLabTitle = selectedLabObj ? selectedLabObj.title : 'All Experiments';
+
   const handleExport = () => {
-    if (records && records.length > 0) {
-      exportLabCompletionsCSV(records);
+    if (filteredRecords && filteredRecords.length > 0) {
+      const sanitizedTitle = selectedLabTitle.replace(/[^a-zA-Z0-9_-]+/g, '_');
+      const filename = `SQLQuest_${sanitizedTitle}_Submissions.csv`;
+      exportLabCompletionsCSV(filteredRecords, filename);
     }
   };
 
   return (
     <div className="mam-wrap">
       <div className="mam-head">
-        <h2>Student Lab Submissions & Completions</h2>
-        <div className="flex gap-8">
+        <div>
+          <h2>Student Submissions & Experiment Analytics</h2>
+          <p className="text-xs text-muted" style={{ marginTop: 2 }}>
+            Filter by specific lab experiment to track students attempting or completed, and export custom reports.
+          </p>
+        </div>
+        <div className="flex gap-8 align-center">
           <button className="btn btn-ghost btn-sm" onClick={load}>↻ Refresh</button>
           <button
             className="btn btn-gold btn-sm"
             onClick={handleExport}
-            disabled={!records || records.length === 0}
+            disabled={!filteredRecords || filteredRecords.length === 0}
+            title={`Export ${filteredRecords.length} filtered record(s) to CSV`}
           >
-            📥 Export CSV
+            📥 Export CSV ({filteredRecords.length})
           </button>
         </div>
       </div>
 
+      {/* Summary metrics row for selected experiment */}
+      <div className="mam-stat-row">
+        <Stat label="Selected Experiment" value={selectedLabId === 'all' ? 'All Experiments' : selectedLabTitle} />
+        <Stat label="Attempted / Active" value={records === null ? '—' : stats.active} />
+        <Stat label="Completed Students" value={records === null ? '—' : stats.completed} />
+        <Stat label="In Progress" value={records === null ? '—' : stats.inProgress} />
+        <Stat label="Completion Rate" value={records === null ? '—' : `${stats.rate}%`} />
+      </div>
+
+      {/* Filter and Experiment Sorting Controls */}
+      <div
+        className="approvals-filter-bar flex gap-12 align-center justify-between"
+        style={{ marginBottom: 14, flexWrap: 'wrap', gap: 12 }}
+      >
+        <div className="flex gap-12 align-center" style={{ flexWrap: 'wrap' }}>
+          {/* Experiment Select Dropdown */}
+          <div className="flex align-center gap-6">
+            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gold, #c9a227)' }}>
+              🧪 Experiment:
+            </span>
+            <select
+              className="approval-search-input"
+              style={{ padding: '6px 12px', minWidth: 200, cursor: 'pointer', background: 'var(--panel, #fff)' }}
+              value={selectedLabId}
+              onChange={(e) => setSelectedLabId(e.target.value)}
+            >
+              <option value="all">🌐 All Experiments ({labsList.length})</option>
+              {labsList.map((lab) => (
+                <option key={lab.id} value={lab.id}>
+                  🧪 {lab.title}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Status Pills */}
+          <div className="flex gap-6" style={{ flexWrap: 'wrap' }}>
+            <button
+              className={`btn btn-sm ${statusFilter === 'active' ? 'btn-gold' : 'btn-ghost'}`}
+              onClick={() => setStatusFilter('active')}
+              title="Show students who are attempting or completed"
+            >
+              ⚡ Active ({stats.active})
+            </button>
+            <button
+              className={`btn btn-sm ${statusFilter === 'completed' ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setStatusFilter('completed')}
+            >
+              ✓ Completed ({stats.completed})
+            </button>
+            <button
+              className={`btn btn-sm ${statusFilter === 'in_progress' ? 'btn-gold' : 'btn-ghost'}`}
+              onClick={() => setStatusFilter('in_progress')}
+            >
+              ⏳ In Progress ({stats.inProgress})
+            </button>
+            <button
+              className={`btn btn-sm ${statusFilter === 'all' ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setStatusFilter('all')}
+              title="Show all records including not started"
+            >
+              All Records ({stats.total})
+            </button>
+          </div>
+        </div>
+
+        {/* Search input */}
+        <input
+          type="text"
+          className="approval-search-input"
+          placeholder="🔍 Search name, PRN, section..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ width: 220 }}
+        />
+      </div>
+
+      {/* Submissions Table */}
       <div className="ledger-card card">
         <div className="mam-table-wrap">
           {records === null ? (
             <div style={{ padding: 24 }}><div className="loading-spinner" /></div>
-          ) : records.length === 0 ? (
-            <p className="text-muted" style={{ padding: 20 }}>No student lab submissions recorded yet.</p>
+          ) : filteredRecords.length === 0 ? (
+            <p className="text-muted" style={{ padding: 24, textAlign: 'center' }}>
+              No student records found matching experiment <strong>"{selectedLabTitle}"</strong> and current status filters.
+            </p>
           ) : (
             <table className="mam-table">
               <thead>
@@ -646,7 +795,7 @@ function LabSubmissionsTab() {
                 </tr>
               </thead>
               <tbody>
-                {records.map((r, i) => (
+                {filteredRecords.map((r, i) => (
                   <tr key={`${r.userId}_${r.labId}_${i}`}>
                     <td className="mam-name">{r.fullName}</td>
                     <td className="mono">{r.prn ?? '—'}</td>
@@ -663,7 +812,11 @@ function LabSubmissionsTab() {
                     </td>
                     <td>
                       {r.latestSql ? (
-                        <code className="mono text-xs" style={{ display: 'inline-block', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.latestSql}>
+                        <code
+                          className="mono text-xs"
+                          style={{ display: 'inline-block', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          title={r.latestSql}
+                        >
                           {r.latestSql}
                         </code>
                       ) : (
