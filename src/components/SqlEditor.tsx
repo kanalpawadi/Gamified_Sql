@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { basicSetup, EditorView } from 'codemirror';
 import { keymap } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
-import { sql } from '@codemirror/lang-sql';
+import { sql, MySQL } from '@codemirror/lang-sql';
 
 export function SqlEditor({
   value,
@@ -60,7 +60,7 @@ export function SqlEditor({
       doc: value,
       extensions: [
         basicSetup,
-        sql(),
+        sql({ dialect: MySQL }),
         keymap.of(keymapsList),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {

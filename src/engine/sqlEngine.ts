@@ -56,6 +56,62 @@ export async function getSqlJs() {
   return sqlJsPromise;
 }
 
+function registerMySQLFunctions(db: any) {
+  if (!db || typeof db.create_function !== 'function') return;
+
+  // CONCAT(str1, str2, ...)
+  db.create_function('concat', (...args: any[]) =>
+    args.map((a) => (a === null || a === undefined ? '' : String(a))).join('')
+  );
+
+  // IFNULL(expr1, expr2)
+  db.create_function('ifnull', (val: any, fallback: any) =>
+    val !== null && val !== undefined ? val : fallback
+  );
+
+  // NOW() -> YYYY-MM-DD HH:MM:SS
+  db.create_function('now', () =>
+    new Date().toISOString().replace('T', ' ').substring(0, 19)
+  );
+
+  // CURDATE() -> YYYY-MM-DD
+  db.create_function('curdate', () =>
+    new Date().toISOString().split('T')[0]
+  );
+
+  // DATEDIFF(expr1, expr2) -> number of days (expr1 - expr2)
+  db.create_function('datediff', (d1: string | null, d2: string | null) => {
+    if (!d1 || !d2) return null;
+    const t1 = new Date(d1).getTime();
+    const t2 = new Date(d2).getTime();
+    if (isNaN(t1) || isNaN(t2)) return null;
+    return Math.round((t1 - t2) / 86400000);
+  });
+
+  // YEAR(date)
+  db.create_function('year', (d: string | null) => {
+    if (!d) return null;
+    const date = new Date(d);
+    return isNaN(date.getTime()) ? null : date.getFullYear();
+  });
+
+  // MONTH(date)
+  db.create_function('month', (d: string | null) => {
+    if (!d) return null;
+    const date = new Date(d);
+    return isNaN(date.getTime()) ? null : date.getMonth() + 1;
+  });
+
+  // DAY(date) / DAYOFMONTH(date)
+  const getDay = (d: string | null) => {
+    if (!d) return null;
+    const date = new Date(d);
+    return isNaN(date.getTime()) ? null : date.getDate();
+  };
+  db.create_function('day', getDay);
+  db.create_function('dayofmonth', getDay);
+}
+
 export async function runEphemeralQuery(
   schemaSQL: string,
   seedSQL: string,
@@ -66,6 +122,9 @@ export async function runEphemeralQuery(
     const SQL = await getSqlJs();
     db = new SQL.Database();
     
+    // Register MySQL compatibility functions
+    registerMySQLFunctions(db);
+
     // Apply schema
     db.run(schemaSQL);
     // Apply seed data
