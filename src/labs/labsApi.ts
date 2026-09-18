@@ -92,11 +92,10 @@ export async function awardLabCompletion(lab: LabExperiment): Promise<{ newBadge
 
 // ── Mam-facing CRUD ────────────────────────────────────────────────────────
 
-export async function listMyLabs(mamId: string): Promise<LabExperiment[]> {
+export async function listMyLabs(_mamId?: string): Promise<LabExperiment[]> {
   const { data, error } = await supabase
     .from('lab_experiments')
     .select('*')
-    .eq('created_by', mamId)
     .order('created_at', { ascending: false });
   if (error) { console.error('listMyLabs:', error.message); return []; }
   return data as LabExperiment[];
