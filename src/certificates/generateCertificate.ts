@@ -62,7 +62,7 @@ export async function generateCertificatePdf(params: {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
   textC(MUTED);
-  doc.text('CERTIFICATE OF ACHIEVEMENT', cx, 96, { align: 'center' });
+  doc.text('CERTIFICATE OF ACHIEVEMENT', cx, 96, { align: 'center', charSpace: 3 });
 
   // ── Brand (SQLQuestByKP centered together) ──────────────────
   doc.setFont('times', 'bold');

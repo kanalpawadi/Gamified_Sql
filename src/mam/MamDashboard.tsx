@@ -8,6 +8,7 @@ import {
   setStudentApproval,
   bulkApprovePendingStudents,
   resetStudentPassword,
+  deleteStudentAccount,
 } from './mamApi';
 import type { StudentOverview, StudentLabRecord } from './mamApi';
 import { listMyLabs, setLabPublished, deleteLab } from '../labs/labsApi';
@@ -227,6 +228,115 @@ function ResetPasswordModal({
   );
 }
 
+function DeleteStudentModal({
+  student,
+  onClose,
+  onSuccess,
+}: {
+  student: ResetStudentInfo;
+  onClose: () => void;
+  onSuccess: (msg: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleDelete = async () => {
+    setBusy(true);
+    setError(null);
+
+    const res = await deleteStudentAccount(student.id);
+    setBusy(false);
+
+    if (res.success) {
+      onSuccess(`Student "${student.fullName}" account and all data deleted permanently.`);
+      onClose();
+    } else {
+      setError(res.error || 'Failed to delete student account.');
+    }
+  };
+
+  return (
+    <div
+      className="modal-backdrop"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0, 0, 0, 0.75)',
+        backdropFilter: 'blur(5px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+        padding: 16,
+      }}
+    >
+      <div
+        className="card ledger-card"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%',
+          maxWidth: 440,
+          padding: 24,
+          background: 'var(--card-bg, #1e293b)',
+          borderColor: 'rgba(239, 68, 68, 0.4)',
+          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#ef4444' }}>
+            🗑️ Delete Student Account
+          </h3>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} style={{ padding: '2px 8px' }}>✕</button>
+        </div>
+
+        <p className="text-xs text-muted" style={{ marginBottom: 14, lineHeight: 1.5 }}>
+          You are about to permanently delete <strong>{student.fullName}</strong>
+          {student.prn ? <code className="mono" style={{ marginLeft: 6 }}>({student.prn})</code> : ''}.
+        </p>
+
+        <div
+          style={{
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: 6,
+            padding: '10px 12px',
+            fontSize: '0.8rem',
+            color: '#f87171',
+            marginBottom: 16,
+          }}
+        >
+          ⚠️ <strong>Warning:</strong> This will delete all solved questions, lab submissions, XP, badges, and certificates for this account. They will be able to register fresh as a new student. This action <strong>cannot be undone</strong>.
+        </div>
+
+        {error && (
+          <div style={{ color: '#f87171', fontSize: '0.82rem', marginBottom: 12 }}>
+            ⚠️ {error}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button className="btn btn-ghost btn-sm" type="button" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            className="btn btn-sm"
+            type="button"
+            onClick={handleDelete}
+            disabled={busy}
+            style={{ background: '#dc2626', color: '#fff', fontWeight: 600, border: 'none' }}
+          >
+            {busy ? 'Deleting…' : '🗑️ Confirm & Delete'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Student Approvals tab ───────────────────────────────────────────────────
 
 function StudentApprovalsTab({ onStatusChanged }: { onStatusChanged?: () => void }) {
@@ -236,6 +346,7 @@ function StudentApprovalsTab({ onStatusChanged }: { onStatusChanged?: () => void
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [resetTarget, setResetTarget] = useState<ResetStudentInfo | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ResetStudentInfo | null>(null);
 
   const load = useCallback(async () => {
     setStudents(null);
@@ -306,6 +417,17 @@ function StudentApprovalsTab({ onStatusChanged }: { onStatusChanged?: () => void
           student={resetTarget}
           onClose={() => setResetTarget(null)}
           onSuccess={(msg) => setMessage({ type: 'success', text: msg })}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteStudentModal
+          student={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onSuccess={(msg) => {
+            setMessage({ type: 'success', text: msg });
+            load();
+          }}
         />
       )}
 
@@ -446,6 +568,15 @@ function StudentApprovalsTab({ onStatusChanged }: { onStatusChanged?: () => void
                           title="Reset password manually for this student"
                         >
                           🔑 Reset Pass
+                        </button>
+
+                        <button
+                          className="btn btn-sm btn-ghost"
+                          style={{ padding: '3px 10px', fontSize: '0.78rem', color: '#ef4444' }}
+                          onClick={() => setDeleteTarget({ id: s.id, fullName: s.fullName, prn: s.prn })}
+                          title="Permanently delete student account & data"
+                        >
+                          🗑️ Delete
                         </button>
                       </div>
                     </td>

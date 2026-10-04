@@ -7,6 +7,8 @@ import { SqlEditor } from '../components/SqlEditor';
 import { ResultsGrid } from '../components/ResultsGrid';
 import { SchemaBlock } from '../components/SchemaBlock';
 import { CopyGuard } from '../components/CopyGuard';
+import { LeetCodeSchemaView } from '../components/LeetCodeSchemaView';
+import { LeetCodeResultsView } from '../components/LeetCodeResultsView';
 import {
   listStudentLabs, getMyLabSubmissions, recordLabSubmission, awardLabCompletion,
   normalizeSqlForMatch,
@@ -272,9 +274,12 @@ function LabSolver({
               </div>
             </CopyGuard>
 
+            {/* Database Schema & Sample Data — LeetCode Table View on Left Side */}
             <CopyGuard className="ledger-card card">
               <div className="card-header"><span aria-hidden>🗄️</span> Schema — {lab.schema_sql ? 'Custom Schema' : lab.domain.replace('_', ' ')}</div>
-              <div className="card-body"><SchemaBlock sql={schema.schemaSQL} /></div>
+              <div className="card-body" style={{ padding: '12px' }}>
+                <LeetCodeSchemaView schemaSQL={schema.schemaSQL} seedSQL={schema.seedSQL} />
+              </div>
             </CopyGuard>
           </div>
 
@@ -324,27 +329,15 @@ function LabSolver({
               </div>
             )}
 
-            {runResult && (
-              <div className="ledger-card card">
-                <div className="card-header"><span aria-hidden>📊</span> Your Result
-                  <span className="text-muted text-sm" style={{ marginLeft: 8 }}>({runResult.rows.length} rows)</span>
-                </div>
-                <div className="card-body" style={{ padding: 0 }}>
-                  <ResultsGrid result={runResult} diff={grading?.diff} />
-                </div>
-              </div>
-            )}
-
-            {grading && !grading.passed && grading.expectedResult && (
-              <div className="ledger-card card ledger-error">
-                <div className="card-header"><span aria-hidden>🎯</span> Expected Result
-                  <span className="text-muted text-sm" style={{ marginLeft: 8 }}>({grading.expectedResult.rows.length} rows)</span>
-                </div>
-                <div className="card-body" style={{ padding: 0 }}>
-                  <ResultsGrid result={grading.expectedResult} />
-                </div>
-              </div>
-            )}
+            {/* LeetCode Test Result & Output View on Right Side */}
+            <div className="ledger-card card" style={{ padding: '12px', marginTop: '12px' }}>
+              <LeetCodeResultsView
+                runResult={runResult}
+                gradingResult={grading}
+                isRunning={isRunning}
+                onExecute={execute}
+              />
+            </div>
           </div>
         </div>
       )}

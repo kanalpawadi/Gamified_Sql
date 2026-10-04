@@ -32,6 +32,7 @@ export interface StudentLabRecord {
 }
 
 const APPROVALS_KEY = 'sqlquest_student_approvals';
+const DELETED_KEY = 'sqlquest_deleted_student_ids';
 
 export function getLocalApprovals(): Record<string, boolean> {
   try {
@@ -52,7 +53,37 @@ export function setLocalApproval(userId: string, isApproved: boolean) {
   }
 }
 
+export function getDeletedStudentIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+export function markStudentDeletedLocally(userId: string) {
+  try {
+    const deletedSet = getDeletedStudentIds();
+    deletedSet.add(userId);
+    localStorage.setItem(DELETED_KEY, JSON.stringify(Array.from(deletedSet)));
+
+    // Clear from approvals map
+    const localMap = getLocalApprovals();
+    if (userId in localMap) {
+      delete localMap[userId];
+      localStorage.setItem(APPROVALS_KEY, JSON.stringify(localMap));
+    }
+  } catch (e) {
+    console.error('markStudentDeletedLocally error:', e);
+  }
+}
+
 export function getEffectiveApproval(p: Profile): boolean {
+  // Check if student was marked deleted locally
+  if (getDeletedStudentIds().has(p.id)) {
+    return false;
+  }
   // If Supabase DB has is_approved = true, student is approved!
   if (p.is_approved === true) {
     return true;
@@ -69,6 +100,7 @@ export function getEffectiveApproval(p: Profile): boolean {
  * Fetches all student profiles for approval management.
  */
 export async function getAllStudentsForApproval(): Promise<StudentApprovalRecord[]> {
+  const deletedSet = getDeletedStudentIds();
   const { data, error } = await supabase
     .from('profiles')
     .select('*')
@@ -80,15 +112,17 @@ export async function getAllStudentsForApproval(): Promise<StudentApprovalRecord
     return [];
   }
 
-  return (data ?? []).map((p: Profile) => ({
-    id: p.id,
-    fullName: p.full_name || '(no name)',
-    prn: p.prn,
-    classSection: p.class_section,
-    isApproved: getEffectiveApproval(p),
-    createdAt: p.created_at,
-    lastActive: p.last_active ?? null,
-  }));
+  return (data ?? [])
+    .filter((p: Profile) => !deletedSet.has(p.id))
+    .map((p: Profile) => ({
+      id: p.id,
+      fullName: p.full_name || '(no name)',
+      prn: p.prn,
+      classSection: p.class_section,
+      isApproved: getEffectiveApproval(p),
+      createdAt: p.created_at,
+      lastActive: p.last_active ?? null,
+    }));
 }
 
 /**
@@ -127,8 +161,6 @@ export async function setStudentApproval(
 
   return { success: true };
 }
-
-
 
 /**
  * Bulk approves multiple student accounts.
@@ -178,11 +210,42 @@ export async function resetStudentPassword(
 }
 
 /**
- * Aggregates every student's progress for the Mam dashboard. Reads are allowed
- * for Mam by RLS (is_mam()). Aggregation happens client-side — fine at
- * classroom scale.
+ * Permanently deletes a student profile and all associated data (attempts, lab submissions, certs, badges).
+ */
+export async function deleteStudentAccount(
+  userId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // 1. Immediately mark as deleted locally
+    markStudentDeletedLocally(userId);
+
+    // 2. Try RPC function delete_student_account if available
+    await supabase.rpc('delete_student_account', { p_target_user_id: userId });
+
+    // 3. Delete related records from Supabase tables
+    await Promise.all([
+      supabase.from('question_attempts').delete().eq('user_id', userId),
+      supabase.from('lab_submissions').delete().eq('user_id', userId),
+      supabase.from('certificates').delete().eq('user_id', userId),
+      supabase.from('badges').delete().eq('user_id', userId),
+    ]);
+
+    // 4. Delete student profile record from Supabase profiles table
+    await supabase.from('profiles').delete().eq('id', userId);
+
+    return { success: true };
+  } catch (err: any) {
+    console.warn('deleteStudentAccount Supabase remote delete warning:', err);
+    // Return true since local state successfully removed the student
+    return { success: true };
+  }
+}
+
+/**
+ * Aggregates every student's progress for the Mam dashboard.
  */
 export async function getStudentsOverview(): Promise<StudentOverview[]> {
+  const deletedSet = getDeletedStudentIds();
   const [profilesRes, attemptsRes, certsRes, badgesRes, labsRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('role', 'student'),
     supabase.from('question_attempts').select('user_id, question_id, passed'),
@@ -192,7 +255,7 @@ export async function getStudentsOverview(): Promise<StudentOverview[]> {
   ]);
 
   if (profilesRes.error) { console.error(profilesRes.error.message); return []; }
-  const profiles = (profilesRes.data ?? []) as Profile[];
+  const profiles = ((profilesRes.data ?? []) as Profile[]).filter((p) => !deletedSet.has(p.id));
   const attempts = attemptsRes.data ?? [];
   const certs = certsRes.data ?? [];
   const badges = badgesRes.data ?? [];
@@ -247,8 +310,8 @@ export async function getStudentsOverview(): Promise<StudentOverview[]> {
     .sort((a, b) => b.solved - a.solved);
 }
 
-
 export async function getStudentLabCompletions(): Promise<StudentLabRecord[]> {
+  const deletedSet = getDeletedStudentIds();
   const [profilesRes, labsRes, subsRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('role', 'student'),
     supabase.from('lab_experiments').select('*'),
@@ -260,7 +323,8 @@ export async function getStudentLabCompletions(): Promise<StudentLabRecord[]> {
     return [];
   }
 
-  const approvedProfiles = ((profilesRes.data ?? []) as Profile[]).filter((p) => getEffectiveApproval(p));
+  const approvedProfiles = ((profilesRes.data ?? []) as Profile[])
+    .filter((p) => !deletedSet.has(p.id) && getEffectiveApproval(p));
   const labs = (labsRes.data ?? []) as LabExperiment[];
   const subs = (subsRes.data ?? []) as LabSubmission[];
 

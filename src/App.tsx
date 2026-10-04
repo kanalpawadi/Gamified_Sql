@@ -30,6 +30,8 @@ import { CopyGuard } from './components/CopyGuard';
 import { SqlEditor } from './components/SqlEditor';
 import { ResultsGrid } from './components/ResultsGrid';
 import { SchemaBlock } from './components/SchemaBlock';
+import { LeetCodeSchemaView } from './components/LeetCodeSchemaView';
+import { LeetCodeResultsView } from './components/LeetCodeResultsView';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -612,7 +614,7 @@ export function StudentApp() {
               </div>
             </CopyGuard>
 
-            {/* Schema — copy-protected */}
+            {/* Database Schema & Input Tables — LeetCode Format on Left Side */}
             <CopyGuard className="ledger-card card">
               <div className="card-header">
                 <button
@@ -622,36 +624,17 @@ export function StudentApp() {
                   aria-controls="schema-body"
                 >
                   <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span aria-hidden>🗄️</span> Database Schema
+                    <span aria-hidden>🗄️</span> Database Schema &amp; Sample Data
                   </span>
                   <span className={`collapsible-chevron ${schemaCollapsed ? '' : 'open'}`} aria-hidden>▼</span>
                 </button>
               </div>
               {!schemaCollapsed && (
-                <div className="card-body" id="schema-body">
-                  <SchemaBlock sql={currentQuestion.schemaSQL} />
-                </div>
-              )}
-            </CopyGuard>
-
-            {/* Sample data — copy-protected */}
-            <CopyGuard className="ledger-card card">
-              <div className="card-header">
-                <button
-                  className="collapsible-trigger"
-                  onClick={() => setSampleCollapsed(c => !c)}
-                  aria-expanded={!sampleCollapsed}
-                  aria-controls="sample-body"
-                >
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span aria-hidden>📊</span> Sample Data
-                  </span>
-                  <span className={`collapsible-chevron ${sampleCollapsed ? '' : 'open'}`} aria-hidden>▼</span>
-                </button>
-              </div>
-              {!sampleCollapsed && (
-                <div className="card-body" id="sample-body">
-                  <SchemaBlock sql={currentQuestion.seedSQL.slice(0, 1200) + (currentQuestion.seedSQL.length > 1200 ? '\n-- (truncated for display)' : '')} />
+                <div className="card-body" id="schema-body" style={{ padding: '12px' }}>
+                  <LeetCodeSchemaView
+                    schemaSQL={currentQuestion.schemaSQL}
+                    seedSQL={currentQuestion.seedSQL}
+                  />
                 </div>
               )}
             </CopyGuard>
@@ -707,7 +690,7 @@ export function StudentApp() {
           </div>
         </div>
 
-        {/* ── Right: SQL Editor ───────────────────────────────────────── */}
+        {/* ── Right: SQL Editor & Query Results ───────────────────────────────────────── */}
         <div className="panel-right" role="region" aria-label="SQL Query Editor">
           {/* Toolbar */}
           <div className="ledger-card card" style={{ flexShrink: 0 }}>
@@ -783,39 +766,19 @@ export function StudentApp() {
             </div>
           )}
 
-          {/* Results grid */}
-          {runResult && (
-            <div className="ledger-card card">
-              <div className="card-header">
-                <span aria-hidden>📊</span> Your Result
-                <span className="text-muted text-sm" style={{ marginLeft: '8px' }}>
-                  ({runResult.rows.length} row{runResult.rows.length !== 1 ? 's' : ''})
-                </span>
-              </div>
-              <div className="card-body" style={{ padding: '0' }}>
-                <ResultsGrid result={runResult} diff={gradingResult?.diff} />
-              </div>
-            </div>
-          )}
-
-          {/* Expected vs actual diff — copy-protected (expected output) */}
-          {gradingResult && !gradingResult.passed && gradingResult.expectedResult && gradingResult.diff && (
-            <CopyGuard className="ledger-card card ledger-error">
-              <div className="card-header">
-                <span aria-hidden>🎯</span> Expected Result
-                <span className="text-muted text-sm" style={{ marginLeft: '8px' }}>
-                  ({gradingResult.expectedResult.rows.length} rows)
-                </span>
-              </div>
-              <div className="card-body" style={{ padding: '0' }}>
-                <ResultsGrid result={gradingResult.expectedResult} />
-              </div>
-            </CopyGuard>
-          )}
+          {/* LeetCode Results & Output View on Right Panel */}
+          <div className="ledger-card card" style={{ padding: '12px', marginTop: '12px' }}>
+            <LeetCodeResultsView
+              runResult={runResult}
+              gradingResult={gradingResult}
+              isRunning={isRunning}
+              onExecute={executeQuery}
+            />
+          </div>
 
           {/* Query log */}
           {queryLog.length > 0 && (
-            <div className="ledger-card card">
+            <div className="ledger-card card" style={{ marginTop: '12px' }}>
               <div className="card-header">
                 <span aria-hidden>📜</span> Query Log
                 <span className="text-muted text-sm" style={{ marginLeft: '4px' }}>
