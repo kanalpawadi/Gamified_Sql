@@ -90,10 +90,14 @@ code, pre, .mono { font-family: var(--font-code); }
 .panel-left,
 .panel-right {
   overflow-y: auto;
-  padding: 20px;
+  overflow-x: hidden;
+  padding: 20px 20px 80px 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  height: 100%;
+  box-sizing: border-box;
+  scroll-behavior: smooth;
 }
 
 .panel-left {
@@ -103,6 +107,42 @@ code, pre, .mono { font-family: var(--font-code); }
 
 .panel-right {
   background: var(--panel);
+}
+
+/* Custom Scrollbars for panels and grid containers */
+.panel-left::-webkit-scrollbar,
+.panel-right::-webkit-scrollbar,
+.leetcode-console-body::-webkit-scrollbar,
+.leetcode-grid-wrapper::-webkit-scrollbar,
+.mam-table-wrap::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.panel-left::-webkit-scrollbar-track,
+.panel-right::-webkit-scrollbar-track,
+.leetcode-console-body::-webkit-scrollbar-track,
+.leetcode-grid-wrapper::-webkit-scrollbar-track,
+.mam-table-wrap::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+}
+
+.panel-left::-webkit-scrollbar-thumb,
+.panel-right::-webkit-scrollbar-thumb,
+.leetcode-console-body::-webkit-scrollbar-thumb,
+.leetcode-grid-wrapper::-webkit-scrollbar-thumb,
+.mam-table-wrap::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 4px;
+}
+
+.panel-left::-webkit-scrollbar-thumb:hover,
+.panel-right::-webkit-scrollbar-thumb:hover,
+.leetcode-console-body::-webkit-scrollbar-thumb:hover,
+.leetcode-grid-wrapper::-webkit-scrollbar-thumb:hover,
+.mam-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.4);
 }
 
 /* ── Cards ───────────────────────────────────────────────────────────────────── */
@@ -1251,7 +1291,7 @@ button.lab-card { border-width: 1px; }
 }
 
 /* ── Lab solver ──────────────────────────────────────────────────────────────── */
-.lab-solver { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.lab-solver { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; padding-bottom: 60px; }
 .lab-solver-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .lab-solver-title { font-family: var(--font-head); font-size: 1.1rem; color: var(--ink); flex: 1; }
 .lab-qnav { display: flex; gap: 6px; flex-wrap: wrap; }
