@@ -13,6 +13,8 @@ import {
   listStudentLabs, getMyLabSubmissions, recordLabSubmission, awardLabCompletion,
   normalizeSqlForMatch,
 } from './labsApi';
+import { generateLabReportPdf } from './generateLabReport';
+import { useAuth } from '../auth/AuthContext';
 
 const STARTER = '-- Write your SQL query here\n-- Ctrl/Cmd + Enter to execute\n\n';
 
@@ -161,7 +163,9 @@ function LabSolver({
   const [isRunning, setIsRunning] = useState(false);
   const [showHint, setShowHint] = useState(false);
   const [justCompleted, setJustCompleted] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const awardedRef = useRef(false);
+  const { profile } = useAuth();
 
   const q: LabQuestion | undefined = lab.questions[qIndex];
   const sql = sqlByQ[q?.id ?? ''] ?? STARTER;
@@ -224,6 +228,25 @@ function LabSolver({
     }
   }, [allDone, lab, onCompletion]);
 
+  // Read-only: builds a PDF from the submissions already stored for this lab.
+  const downloadReport = useCallback(async () => {
+    setDownloading(true);
+    try {
+      const submissions = await getMyLabSubmissions(lab.id);
+      generateLabReportPdf({
+        lab,
+        submissions,
+        studentName: profile?.full_name ?? 'Student',
+        prn: profile?.prn,
+        section: profile?.class_section,
+      });
+    } catch (e) {
+      console.error('downloadReport:', (e as Error).message);
+    } finally {
+      setDownloading(false);
+    }
+  }, [lab, profile]);
+
   return (
     <div className="lab-solver">
       <div className="lab-solver-bar">
@@ -239,6 +262,15 @@ function LabSolver({
             <div className="verdict-title">Lab complete!</div>
             <div className="verdict-detail">Badge “{lab.badge_name}” awarded and your completion certificate is ready in the Certificates tab.</div>
           </div>
+        </div>
+      )}
+
+      {allDone && (
+        <div className="flex items-center justify-between" style={{ gap: 12, flexWrap: 'wrap', margin: '8px 0' }}>
+          <span className="text-muted text-sm">All challenges solved — download a copy of your questions and answers.</span>
+          <button className="btn btn-ghost btn-sm" onClick={downloadReport} disabled={downloading}>
+            {downloading ? 'Preparing…' : '📄 Download lab report (PDF)'}
+          </button>
         </div>
       )}
 
