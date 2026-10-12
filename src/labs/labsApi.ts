@@ -46,10 +46,14 @@ export async function listStudentLabs(section: string | null, isApproved: boolea
 }
 
 export async function getMyLabSubmissions(labId: string): Promise<LabSubmission[]> {
+  // Explicitly scope to the current user so this works regardless of RLS config.
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
   const { data, error } = await supabase
     .from('lab_submissions')
     .select('*')
     .eq('lab_id', labId)
+    .eq('user_id', user.id)
     .order('created_at', { ascending: false });
   if (error) { console.error('getMyLabSubmissions:', error.message); return []; }
   return data as LabSubmission[];
@@ -58,8 +62,12 @@ export async function getMyLabSubmissions(labId: string): Promise<LabSubmission[
 export async function recordLabSubmission(p: {
   labId: string; questionId: string; passed: boolean; sql: string;
 }): Promise<void> {
+  // Explicitly include user_id so submissions are correctly linked on deployed
+  // instances where RLS auth.uid() triggers may not automatically populate it.
+  const { data: { user } } = await supabase.auth.getUser();
   const { error } = await supabase.from('lab_submissions').insert({
     lab_id: p.labId, question_id: p.questionId, passed: p.passed, submitted_sql: p.sql,
+    ...(user ? { user_id: user.id } : {}),
   });
   if (error) console.error('recordLabSubmission:', error.message);
 }
