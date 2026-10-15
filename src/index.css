@@ -2236,3 +2236,39 @@ button.lab-card { border-width: 1px; }
 }
 
 
+
+/* ── Internal tests ─────────────────────────────────────────────────────── */
+.itest-tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.itest-timer {
+  font-family: var(--font-code); font-weight: 700; padding: 4px 10px; border-radius: 6px;
+  background: var(--primary-10); color: var(--primary);
+}
+.itest-timer.low { background: var(--error-10); color: var(--error); animation: itest-pulse 1s ease-in-out infinite; }
+@keyframes itest-pulse { 50% { opacity: 0.6; } }
+@media (prefers-reduced-motion: reduce) { .itest-timer.low { animation: none; } }
+.itest-save { font-size: 0.78rem; color: var(--muted); }
+.itest-save-saved { color: var(--success); }
+.itest-save-error { color: var(--error); }
+.itest-modal-backdrop {
+  position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px);
+}
+.itest-modal { width: 100%; max-width: 520px; max-height: calc(100vh - 32px); overflow: auto; background: var(--panel); }
+.itest-modal-wide { max-width: 980px; }
+.itest-rules { margin: 0; padding-left: 20px; line-height: 1.7; }
+.itest-code {
+  margin: 4px 0 0; padding: 10px 12px; border-radius: 6px; background: var(--primary-10);
+  font-family: var(--font-code); font-size: 0.82rem; white-space: pre-wrap; word-break: break-word;
+  max-height: 260px; overflow: auto;
+}
+.itest-review-q { padding: 12px 0; border-bottom: 1px solid var(--primary-10); }
+.itest-review-q:first-child { padding-top: 0; }
+.itest-review-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
+@media (max-width: 720px) { .itest-review-cols { grid-template-columns: 1fr; } }
+.itest-note {
+  padding: 8px 12px; margin-bottom: 12px; border-radius: 6px; font-size: 0.85rem;
+  background: var(--gold-10); border: 1px solid var(--gold-30);
+}
+.itest-msg { padding: 10px 14px; margin-bottom: 14px; border-radius: 6px; font-size: 0.88rem; font-weight: 500; }
+.itest-msg-success { background: var(--success-10); border: 1px solid var(--success-30); color: var(--success); }
+.itest-msg-error { background: var(--error-10); border: 1px solid var(--error-30); color: var(--error); }

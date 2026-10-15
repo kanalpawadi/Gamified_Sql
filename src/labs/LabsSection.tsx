@@ -15,6 +15,7 @@ import {
 } from './labsApi';
 import { generateLabReportPdf } from './generateLabReport';
 import { useAuth } from '../auth/AuthContext';
+import { InternalTestsSection } from '../tests/InternalTestsSection';
 
 const STARTER = '-- Write your SQL query here\n-- Ctrl/Cmd + Enter to execute\n\n';
 
@@ -30,6 +31,9 @@ export function LabsSection({
   const [labs, setLabs] = useState<LabExperiment[] | null>(null);
   const [active, setActive] = useState<LabExperiment | null>(null);
   const [passedByLab, setPassedByLab] = useState<Record<string, Set<string>>>({});
+  const [view, setView] = useState<'labs' | 'tests'>('labs');
+  const [testFocused, setTestFocused] = useState(false);
+  const { profile } = useAuth();
 
   const refreshLabs = useCallback(async () => {
     if (!isApproved) {
@@ -77,6 +81,20 @@ export function LabsSection({
     );
   }
 
+  if (view === 'tests' && profile) {
+    return (
+      <div className="labs-wrap">
+        {!testFocused && <LabsViewTabs view={view} onChange={setView} />}
+        <InternalTestsSection
+          userId={profile.id}
+          section={section}
+          isApproved={isApproved}
+          onFocusChange={setTestFocused}
+        />
+      </div>
+    );
+  }
+
   if (active) {
     return (
       <LabSolver
@@ -90,6 +108,7 @@ export function LabsSection({
 
   return (
     <div className="labs-wrap">
+      <LabsViewTabs view={view} onChange={setView} />
       <div className="labs-head">
         <div className="flex items-center justify-between" style={{ gap: 12, flexWrap: 'wrap' }}>
           <h2>🧪 Lab Experiments</h2>
@@ -140,6 +159,19 @@ export function LabsSection({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function LabsViewTabs({ view, onChange }: { view: 'labs' | 'tests'; onChange: (v: 'labs' | 'tests') => void }) {
+  return (
+    <div className="itest-tabs" role="tablist">
+      <button role="tab" aria-selected={view === 'labs'} className={`btn btn-sm ${view === 'labs' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => onChange('labs')}>
+        🧪 Lab Experiments
+      </button>
+      <button role="tab" aria-selected={view === 'tests'} className={`btn btn-sm ${view === 'tests' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => onChange('tests')}>
+        📝 Internal Tests
+      </button>
     </div>
   );
 }

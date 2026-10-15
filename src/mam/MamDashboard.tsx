@@ -14,10 +14,11 @@ import type { StudentOverview, StudentLabRecord } from './mamApi';
 import { listMyLabs, setLabPublished, deleteLab } from '../labs/labsApi';
 import type { LabExperiment, StudentApprovalRecord } from '../lib/types';
 import { LabCreator } from './LabCreator';
+import { InternalTestsTab } from './InternalTestsTab';
 
 export function MamDashboard() {
   const { profile, signOut } = useAuth();
-  const [tab, setTab] = useState<'students' | 'approvals' | 'submissions' | 'labs'>('students');
+  const [tab, setTab] = useState<'students' | 'approvals' | 'submissions' | 'labs' | 'tests'>('students');
   const [pendingCount, setPendingCount] = useState<number>(0);
 
   const checkPendingCount = useCallback(async () => {
@@ -61,6 +62,12 @@ export function MamDashboard() {
           >
             🧪 Labs
           </button>
+          <button
+            className={`btn btn-sm ${tab === 'tests' ? 'btn-gold' : 'btn-ghost-inv'}`}
+            onClick={() => setTab('tests')}
+          >
+            📝 Internal Tests
+          </button>
           <button className="btn btn-ghost-inv btn-sm" onClick={signOut}>Sign out</button>
         </div>
       </header>
@@ -72,8 +79,10 @@ export function MamDashboard() {
           <StudentApprovalsTab onStatusChanged={checkPendingCount} />
         ) : tab === 'submissions' ? (
           <LabSubmissionsTab />
-        ) : (
+        ) : tab === 'labs' ? (
           <LabsTab mamId={profile!.id} />
+        ) : (
+          <InternalTestsTab />
         )}
       </main>
     </>

@@ -98,7 +98,11 @@ npm run dev      # http://localhost:3001
 3. Add environment variables (Project → Settings → Environment Variables):
    - `VITE_SUPABASE_URL = https://YOUR_PROJECT_REF.supabase.co`
    - `VITE_SUPABASE_ANON_KEY = <your anon public key>`
-4. Deploy. No serverless functions are used.
+   - `GROQ_API_KEY = <your Groq key>` — **server-only** (no `VITE_` prefix), used
+     by `api/grade-internal-test.ts` for Internal Test AI grading. Optional:
+     `GROQ_MODEL` (default `openai/gpt-oss-120b`).
+4. Deploy. The only serverless function is `api/grade-internal-test.ts`
+   (Internal Tests AI grading); everything else is static.
 
 > The anon key is meant to be public (shipped in the client). Security comes from
 > RLS, which is why the policies matter.
@@ -131,3 +135,26 @@ npm run dev      # http://localhost:3001
 - **localStorage (per user)** keeps device-local gamification only — XP running
   total, streaks, query drafts, weak-tag/stuck hints — and is cleared when a
   different account logs in on the same browser.
+
+
+---
+
+## 9. Internal Tests (migration `0009_internal_tests.sql`)
+
+Mam-authored tests with hidden answer keys, AI grading and Mam review. Purely
+additive — no existing table, policy or function is changed.
+
+- **Apply:** Supabase Dashboard → SQL Editor → paste `0009_internal_tests.sql` → Run (idempotent).
+- **Answer keys** live in `internal_test_keys` (Mam-only RLS) — never sent to students.
+- **Student answers** are written only via `start_internal_test()` /
+  `save_internal_test_answers()`, which enforce section, approval, 1 attempt
+  (+ Mam-granted extras via `grant_internal_test_attempt()`) and the time limit
+  (server clock, 90 s grace).
+- **Grading:** Mam clicks *Grade with AI* → `/api/grade-internal-test` calls Groq
+  with Mam's own session token (no service-role key; RLS applies) and stores
+  AI marks in `internal_test_grades`. The AI is told to grade **only constraints
+  & keys** and ignore data types / syntax. Mam reviews/adjusts and approves.
+- **Release:** students see a grade only when it's reviewed **and** the test's
+  *Release results* toggle is on.
+- **Local dev:** put `GROQ_API_KEY=...` in `.env`; `npm run dev` serves `/api/*`
+  through a dev-only Vite middleware (no `vercel dev` needed).

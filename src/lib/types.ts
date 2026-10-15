@@ -96,3 +96,57 @@ export interface QuestionAttemptRow {
   attempt_sql: string | null;
   created_at: string;
 }
+
+// ── Internal tests (Mam-authored, AI-graded, Mam-reviewed) ─────────────────
+
+export interface InternalTestQuestion {
+  id: string;
+  prompt: string;
+  marks: number;
+}
+
+export interface InternalTest {
+  id: string;
+  created_by: string | null;
+  title: string;
+  description: string;
+  schema_sql: string;
+  questions: InternalTestQuestion[];
+  target_sections: string[];
+  duration_minutes: number | null;
+  published: boolean;
+  results_released: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InternalTestAttempt {
+  id: string;
+  test_id: string;
+  user_id: string;
+  attempt_no: number;
+  answers: Record<string, string>;
+  started_at: string;
+  deadline_at: string | null;
+  submitted_at: string | null;
+  auto_submitted: boolean;
+}
+
+export interface InternalTestQuestionMark {
+  marks: number;
+  max: number;
+  feedback: string;
+}
+
+export interface InternalTestGrade {
+  attempt_id: string;
+  ai_marks: Record<string, InternalTestQuestionMark> | null;
+  ai_model: string | null;
+  ai_graded_at: string | null;
+  final_marks: Record<string, number>;
+  score: number;
+  max_score: number;
+  percent: number;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+}
