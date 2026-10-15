@@ -1,6 +1,7 @@
 // Supabase-backed progress. question_attempts is the source of truth for graded
 // progress; completedIds / skillProfile / XP baseline are derived from it on load.
 import { supabase } from '../lib/supabaseClient';
+import { fetchAllRows } from '../lib/fetchAllRows';
 import { allQuestions } from '../data/index';
 import type { Question } from '../data/index';
 import type { SkillProfile } from '../engine/adaptiveEngine';
@@ -45,14 +46,20 @@ export async function loadProgress(userId: string): Promise<DerivedProgress> {
     derivedXp: 0,
   };
 
-  const { data, error } = await supabase
+  // Paged: an active student passes Supabase's 1000-row cap, and a single
+  // select would silently drop their NEWEST attempts.
+  const { data, error } = await fetchAllRows<{
+    question_id: string; category: string | null; tags: string[] | null; passed: boolean; created_at: string;
+  }>((from, to) => supabase
     .from('question_attempts')
     .select('question_id, category, tags, passed, created_at')
     .eq('user_id', userId)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+    .range(from, to));
 
   if (error) {
-    console.error('loadProgress failed:', error.message);
+    console.error('loadProgress failed:', error);
     return empty;
   }
 

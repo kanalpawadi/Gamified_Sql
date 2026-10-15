@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabaseClient';
 import type { Profile, LabExperiment, LabSubmission, StudentApprovalRecord } from '../lib/types';
 import { labAssignedToSection } from '../labs/labsApi';
+import { fetchAllRows } from '../lib/fetchAllRows';
 
 export interface StudentOverview {
   id: string;
@@ -246,15 +247,19 @@ export async function deleteStudentAccount(
  */
 export async function getStudentsOverview(): Promise<StudentOverview[]> {
   const deletedSet = getDeletedStudentIds();
+  // Class-wide tables exceed Supabase's 1000-row cap — page through them.
   const [profilesRes, attemptsRes, certsRes, badgesRes, labsRes] = await Promise.all([
-    supabase.from('profiles').select('*').eq('role', 'student'),
-    supabase.from('question_attempts').select('user_id, question_id, passed'),
-    supabase.from('certificates').select('user_id, cert_type, lab_id'),
-    supabase.from('badges').select('user_id'),
+    fetchAllRows<Profile>((from, to) => supabase.from('profiles').select('*').eq('role', 'student').order('id').range(from, to)),
+    fetchAllRows<{ user_id: string; question_id: string; passed: boolean }>((from, to) =>
+      supabase.from('question_attempts').select('user_id, question_id, passed').order('id').range(from, to)),
+    fetchAllRows<{ user_id: string; cert_type: string; lab_id: string | null }>((from, to) =>
+      supabase.from('certificates').select('user_id, cert_type, lab_id').order('id').range(from, to)),
+    fetchAllRows<{ user_id: string }>((from, to) => supabase.from('badges').select('user_id').order('id').range(from, to)),
     supabase.from('lab_experiments').select('target_sections').eq('published', true),
   ]);
 
-  if (profilesRes.error) { console.error(profilesRes.error.message); return []; }
+  if (profilesRes.error) { console.error(profilesRes.error); return []; }
+  for (const r of [attemptsRes, certsRes, badgesRes]) if (r.error) console.error('getStudentsOverview:', r.error);
   const profiles = ((profilesRes.data ?? []) as Profile[]).filter((p) => !deletedSet.has(p.id));
   const attempts = attemptsRes.data ?? [];
   const certs = certsRes.data ?? [];
@@ -312,44 +317,69 @@ export async function getStudentsOverview(): Promise<StudentOverview[]> {
 
 export async function getStudentLabCompletions(): Promise<StudentLabRecord[]> {
   const deletedSet = getDeletedStudentIds();
+  // lab_submissions grows past Supabase's 1000-row cap quickly (every Run is a
+  // row) — a single select silently dropped older passes, so students who had
+  // finished showed as "In Progress"/"Not Started". Page through everything.
   const [profilesRes, labsRes, subsRes] = await Promise.all([
-    supabase.from('profiles').select('*').eq('role', 'student'),
+    fetchAllRows<Profile>((from, to) => supabase.from('profiles').select('*').eq('role', 'student').order('id').range(from, to)),
     supabase.from('lab_experiments').select('*'),
-    supabase.from('lab_submissions').select('*').order('created_at', { ascending: false }),
+    fetchAllRows<LabSubmission>((from, to) =>
+      supabase.from('lab_submissions').select('*').order('created_at', { ascending: false }).order('id').range(from, to)),
   ]);
 
-  if (profilesRes.error || labsRes.error) {
-    console.error('getStudentLabCompletions error:', profilesRes.error || labsRes.error);
-    return [];
+  if (profilesRes.error || labsRes.error || subsRes.error) {
+    console.error('getStudentLabCompletions error:', profilesRes.error || labsRes.error?.message || subsRes.error);
+    if (profilesRes.error || labsRes.error) return [];
   }
 
-  const approvedProfiles = ((profilesRes.data ?? []) as Profile[])
+  const approvedProfiles = profilesRes.data
     .filter((p) => !deletedSet.has(p.id) && getEffectiveApproval(p));
-  const labs = (labsRes.data ?? []) as LabExperiment[];
-  const subs = (subsRes.data ?? []) as LabSubmission[];
+  return buildLabRecords(approvedProfiles, (labsRes.data ?? []) as LabExperiment[], subsRes.data);
+}
 
+/** Display form of a submitted query: drops the editor's starter comments. */
+export function cleanSubmittedSql(sql: string | null): string | null {
+  if (!sql) return null;
+  const cleaned = sql
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .split(/\r?\n/)
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n')
+    .trim();
+  return cleaned || null;
+}
+
+/**
+ * Pure: one record per (approved student, lab). Exported for tests.
+ * - Only questions that still exist in the lab count towards "solved".
+ * - Draft labs and labs no longer assigned to the student's section are
+ *   skipped unless the student already has submissions for them.
+ */
+export function buildLabRecords(
+  profiles: Profile[], labs: LabExperiment[], subs: LabSubmission[],
+): StudentLabRecord[] {
   const submissionsGrouped = new Map<string, LabSubmission[]>();
   for (const s of subs) {
     const key = `${s.user_id}_${s.lab_id}`;
     if (!submissionsGrouped.has(key)) submissionsGrouped.set(key, []);
     submissionsGrouped.get(key)!.push(s);
   }
+  // Newest first, regardless of the order rows arrived in.
+  for (const list of submissionsGrouped.values()) list.sort((a, b) => b.created_at.localeCompare(a.created_at));
 
   const records: StudentLabRecord[] = [];
 
-  for (const p of approvedProfiles) {
+  for (const p of profiles) {
     for (const lab of labs) {
-      if (!labAssignedToSection(lab.target_sections, p.class_section)) {
-        continue;
-      }
+      const userSubs = submissionsGrouped.get(`${p.id}_${lab.id}`) ?? [];
+      const relevant = lab.published && labAssignedToSection(lab.target_sections, p.class_section);
+      if (!relevant && userSubs.length === 0) continue;
 
-      const key = `${p.id}_${lab.id}`;
-      const userSubs = submissionsGrouped.get(key) ?? [];
       const passedQuestions = new Set(userSubs.filter((s) => s.passed).map((s) => s.question_id));
-      const solvedCount = passedQuestions.size;
+      const solvedCount = lab.questions.filter((q) => passedQuestions.has(q.id)).length;
       const totalQuestions = lab.questions.length;
 
-      let status: 'Completed' | 'In Progress' | 'Not Started' = 'Not Started';
+      let status: StudentLabRecord['status'] = 'Not Started';
       if (totalQuestions > 0 && solvedCount === totalQuestions) {
         status = 'Completed';
       } else if (userSubs.length > 0) {
@@ -369,7 +399,7 @@ export async function getStudentLabCompletions(): Promise<StudentLabRecord[]> {
         solvedCount,
         totalQuestions,
         lastSubmittedAt: lastSub?.created_at ?? null,
-        latestSql: lastSub?.submitted_sql ?? null,
+        latestSql: cleanSubmittedSql(lastSub?.submitted_sql ?? null),
       });
     }
   }
