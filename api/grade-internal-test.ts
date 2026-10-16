@@ -15,6 +15,13 @@ declare const process: { env: Record<string, string | undefined> };
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const DEFAULT_MODEL = 'openai/gpt-oss-120b';
 
+// Same public fallbacks as src/lib/supabaseClient.ts (the anon key is public
+// and RLS is the boundary), so grading works even when the VITE_ vars are only
+// set for some Vercel environments.
+const DEFAULT_SUPABASE_URL = 'https://vgbpqdnwrlfuzhmtaqij.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnYnBxZG53cmxmdXpobXRhcWlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NjM5MzYsImV4cCI6MjEwNDUzOTkzNn0.s0HceDJZ43gdUIbGw9xmmBrHVYtTvW-qtuGIe7nLHI0';
+
 const SYSTEM_PROMPT = `You are a strict but fair SQL examiner grading a student's internal test.
 For each question you receive: the question, the teacher's reference answer, the maximum marks, and the student's answer.
 
@@ -114,8 +121,8 @@ export async function gradeWithGroq(
 
 export async function POST(request: Request): Promise<Response> {
   const groqKey = process.env.GROQ_API_KEY;
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const supabaseAnon = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  const supabaseAnon = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
   const model = process.env.GROQ_MODEL || DEFAULT_MODEL;
 
   if (!groqKey) return json(500, { error: 'GROQ_API_KEY is not configured on the server.' });
