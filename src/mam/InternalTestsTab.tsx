@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import type { InternalTest, InternalTestGrade, InternalTestQuestion } from '../lib/types';
+import type { InternalTest, InternalTestGrade, InternalTestMode, InternalTestQuestion, PoolQuestion } from '../lib/types';
 import { CLASS_SECTIONS } from '../data/sections';
 import { SchemaBlock } from '../components/SchemaBlock';
 import {
   listAllTests, getTestKey, saveTest, updateTestFlags, deleteTest, getTestResults,
   grantExtraAttempt, forceSubmitAttempt, gradeAttemptWithAI, saveReview, computeScore,
-  exportTestResultsCSV, isAttemptClosed, testMaxScore,
+  exportTestResultsCSV, isAttemptClosed, testMaxScore, testQuestionCount, questionsOf,
+  getTestPool, parseQuestionBundle, groupByTopic, pickSampleSet,
 } from '../tests/testsApi';
 import type { TestDraft, TestResultRow } from '../tests/testsApi';
 
@@ -35,7 +36,7 @@ export function InternalTestsTab() {
         <div>
           <h2>Internal Tests</h2>
           <p className="text-xs text-muted" style={{ marginTop: 2 }}>
-            Set a schema and questions, students answer once, AI grades on constraints &amp; keys, you review and release results.
+            Set a schema and questions, students answer once, AI grades each answer against the question, you review and release results.
           </p>
         </div>
         <div className="flex gap-8">
@@ -58,11 +59,12 @@ export function InternalTestsTab() {
               <div className="lab-card-top">
                 <span className={`pill ${t.published ? 'pill-easy' : 'pill-medium'}`}>{t.published ? 'Published' : 'Draft'}</span>
                 {t.results_released && <span className="pill pill-approved">Results released</span>}
+                {t.mode === 'random' && <span className="pill pill-basic" title="Each student gets a different random set">🎲 Random sets</span>}
               </div>
               <h3 className="lab-card-title">{t.title}</h3>
               <p className="lab-card-desc">{t.description || <span className="text-muted">No description</span>}</p>
               <p className="text-xs text-muted" style={{ marginBottom: 8 }}>
-                {t.questions.length} Qs · {testMaxScore(t)} marks · {t.duration_minutes ? `${t.duration_minutes} min` : 'No time limit'}
+                {testQuestionCount(t)} Qs{t.mode === 'random' ? ' per student' : ''} · {testMaxScore(t)} marks · {t.duration_minutes ? `${t.duration_minutes} min` : 'No time limit'}
                 {' · '}Sections: {t.target_sections.length ? t.target_sections.join(', ') : 'All'}
               </p>
               <div className="flex gap-8" style={{ flexWrap: 'wrap' }}>
@@ -115,6 +117,13 @@ function TestCreator({ existing, onSaved, onCancel }: { existing?: InternalTest;
   const [questions, setQuestions] = useState<QDraft[]>(
     existing?.questions?.length ? existing.questions.map((q) => ({ ...q, reference: '' })) : [blankQ()]
   );
+  const [mode, setMode] = useState<InternalTestMode>(existing?.mode ?? 'fixed');
+  const [pool, setPool] = useState<PoolQuestion[]>([]);
+  const [bundleText, setBundleText] = useState('');
+  const [bundleMsg, setBundleMsg] = useState<string | null>(null);
+  const [count, setCount] = useState<string>(String(existing?.question_count ?? 10));
+  const [marksEach, setMarksEach] = useState<string>(String(existing?.marks_per_question ?? 10));
+  const [sample, setSample] = useState<PoolQuestion[] | null>(null);
   const [keyLoaded, setKeyLoaded] = useState(!existing);
   const [showSchema, setShowSchema] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -123,8 +132,9 @@ function TestCreator({ existing, onSaved, onCancel }: { existing?: InternalTest;
   // Load the answer key for an existing test (Mam-only table).
   useEffect(() => {
     if (!existing) return;
-    getTestKey(existing.id).then((key) => {
+    Promise.all([getTestKey(existing.id), existing.mode === 'random' ? getTestPool(existing.id) : []]).then(([key, p]) => {
       setQuestions((qs) => qs.map((q) => ({ ...q, reference: key[q.id] ?? '' })));
+      setPool(p);
       setKeyLoaded(true);
     });
   }, [existing]);
@@ -141,23 +151,51 @@ function TestCreator({ existing, onSaved, onCancel }: { existing?: InternalTest;
     if (!title.trim()) { setError('Title is required.'); return; }
     const dur = duration.trim() ? Number(duration) : null;
     if (dur != null && (!Number.isInteger(dur) || dur <= 0)) { setError('Time limit must be a whole number of minutes (or blank for none).'); return; }
-    const clean = questions
-      .map((q) => ({ ...q, prompt: q.prompt.trim(), reference: q.reference.trim(), marks: Number(q.marks) }))
-      .filter((q) => q.prompt);
-    if (clean.length === 0) { setError('Add at least one question.'); return; }
-    const bad = clean.find((q) => !q.reference || !(q.marks > 0));
-    if (bad) { setError(`Question “${bad.prompt.slice(0, 40)}…” needs a correct answer and marks greater than 0.`); return; }
-
-    const draft: TestDraft = {
+    const common = {
       title: title.trim(),
       description: description.trim(),
       schema_sql: schemaSql.trim(),
-      questions: clean.map(({ id, prompt, marks }) => ({ id, prompt, marks })),
       target_sections: sections,
       duration_minutes: dur,
       published: publish,
     };
-    const key = Object.fromEntries(clean.map((q) => [q.id, q.reference]));
+
+    if (mode === 'random') {
+      const cnt = Number(count);
+      const each = Number(marksEach);
+      const cleanPool = pool
+        .map((q) => ({ ...q, topic: q.topic.trim() || 'General', prompt: q.prompt.trim() }))
+        .filter((q) => q.prompt);
+      if (cleanPool.length === 0) { setError('Paste your question bundle and click “Read questions” first.'); return; }
+      if (!Number.isInteger(cnt) || cnt <= 0) { setError('Questions per student must be a whole number greater than 0.'); return; }
+      if (cnt > cleanPool.length) { setError(`The bundle has only ${cleanPool.length} questions — lower “Questions per student” or add more questions.`); return; }
+      if (!(each > 0)) { setError('Marks per question must be greater than 0.'); return; }
+      setSaving(true);
+      const res = await saveTest(
+        { ...common, questions: [], mode: 'random', question_count: cnt, marks_per_question: each },
+        {}, existing?.id, cleanPool,
+      );
+      setSaving(false);
+      if (res.error) { setError(res.error); return; }
+      onSaved();
+      return;
+    }
+
+    const clean = questions
+      .map((q) => ({ ...q, prompt: q.prompt.trim(), reference: q.reference.trim(), marks: Number(q.marks) }))
+      .filter((q) => q.prompt);
+    if (clean.length === 0) { setError('Add at least one question.'); return; }
+    const bad = clean.find((q) => !(q.marks > 0));
+    if (bad) { setError(`Question “${bad.prompt.slice(0, 40)}…” needs marks greater than 0.`); return; }
+
+    const draft: TestDraft = {
+      ...common,
+      questions: clean.map(({ id, prompt, marks }) => ({ id, prompt, marks })),
+      mode: 'fixed',
+      question_count: null,
+      marks_per_question: null,
+    };
+    const key = Object.fromEntries(clean.filter((q) => q.reference).map((q) => [q.id, q.reference]));
 
     setSaving(true);
     const res = await saveTest(draft, key, existing?.id);
@@ -201,6 +239,22 @@ function TestCreator({ existing, onSaved, onCancel }: { existing?: InternalTest;
           </div>
         </div>
 
+        <div className="auth-field" style={{ marginTop: 12 }}>
+          <span>Questions</span>
+          <div className="itest-mode" role="radiogroup">
+            <label className={`itest-mode-opt ${mode === 'fixed' ? 'on' : ''}`}>
+              <input type="radio" name="itest-mode" checked={mode === 'fixed'} onChange={() => setMode('fixed')} />
+              <strong>✍️ Write questions myself</strong>
+              <span className="text-xs text-muted">Every student answers the same questions.</span>
+            </label>
+            <label className={`itest-mode-opt ${mode === 'random' ? 'on' : ''}`}>
+              <input type="radio" name="itest-mode" checked={mode === 'random'} onChange={() => setMode('random')} />
+              <strong>🎲 Random set from a topic bundle</strong>
+              <span className="text-xs text-muted">Paste topic-wise questions; each student gets a different set.</span>
+            </label>
+          </div>
+        </div>
+
         <label className="auth-field" style={{ marginTop: 12 }}>
           <span>Database schema shown to students (CREATE TABLE …)</span>
           <textarea
@@ -218,6 +272,22 @@ function TestCreator({ existing, onSaved, onCancel }: { existing?: InternalTest;
           {showSchema && <div style={{ marginTop: 8 }}><SchemaBlock sql={schemaSql} /></div>}
         </div>
 
+        {mode === 'random' ? (
+          <BundleEditor
+            pool={pool}
+            setPool={(p) => { setPool(p); setSample(null); }}
+            bundleText={bundleText}
+            setBundleText={setBundleText}
+            message={bundleMsg}
+            setMessage={setBundleMsg}
+            count={count}
+            setCount={setCount}
+            marksEach={marksEach}
+            setMarksEach={setMarksEach}
+            sample={sample}
+            setSample={setSample}
+          />
+        ) : (
         <div className="lc-questions">
           <div className="flex items-center justify-between" style={{ margin: '16px 0 8px' }}>
             <strong>Questions ({questions.length}) · {total} marks total</strong>
@@ -239,14 +309,15 @@ function TestCreator({ existing, onSaved, onCancel }: { existing?: InternalTest;
                   )}
                 </div>
               </div>
-              <textarea className="auth-input" rows={2} value={q.prompt} onChange={(e) => patchQ(q.id, { prompt: e.target.value })} placeholder="Question shown to students" />
+              <textarea className="auth-input" rows={2} value={q.prompt} onChange={(e) => patchQ(q.id, { prompt: e.target.value })} placeholder="Question shown to students — state every key / constraint you expect; the AI grades against exactly this" />
               <textarea className="auth-input mono" style={{ marginTop: 6, fontFamily: 'var(--font-code)' }} rows={4}
                 value={q.reference} onChange={(e) => patchQ(q.id, { reference: e.target.value })}
-                placeholder="Correct answer (hidden from students — used by the AI to grade)" />
+                placeholder="Model answer — optional, only you see it while reviewing (the AI grades from the question)" />
             </div>
           ))}
           <button className="btn btn-ghost btn-sm" type="button" onClick={() => setQuestions((qs) => [...qs, blankQ()])} style={{ marginTop: 8 }}>+ Add question</button>
         </div>
+        )}
 
         {error && <div className="auth-error" role="alert" style={{ marginTop: 12 }}>{error}</div>}
 
@@ -373,7 +444,7 @@ function TestResults({ test: initial, onBack }: { test: InternalTest; onBack: ()
             return ok;
           }}
           onSave={async (marks) => {
-            const res = await saveReview(test, reviewing.latest!.id, marks, profile!.id);
+            const res = await saveReview(questionsOf(test, reviewing.latest), reviewing.latest!.id, marks, profile!.id);
             if (res.error) return res.error;
             setGrade(reviewing.latest!.id, res.grade!);
             setReviewing(null);
@@ -388,7 +459,7 @@ function TestResults({ test: initial, onBack }: { test: InternalTest; onBack: ()
           <button className="btn btn-ghost btn-sm" onClick={onBack} style={{ marginBottom: 6 }}>← All tests</button>
           <h2>{test.title} — Results</h2>
           <p className="text-xs text-muted" style={{ marginTop: 2 }}>
-            {test.questions.length} questions · {testMaxScore(test)} marks · {test.duration_minutes ? `${test.duration_minutes} min` : 'no time limit'}
+            {testQuestionCount(test)} questions{test.mode === 'random' ? ' per student (random sets)' : ''} · {testMaxScore(test)} marks · {test.duration_minutes ? `${test.duration_minutes} min` : 'no time limit'}
           </p>
         </div>
         <div className="flex gap-8" style={{ flexWrap: 'wrap' }}>
@@ -530,18 +601,19 @@ function ReviewModal({
   onRegrade: () => Promise<boolean>;
 }) {
   const grade = latestGrade;
+  const questions = questionsOf(test, row.latest);
   const [marks, setMarks] = useState<Record<string, number>>(
-    () => Object.fromEntries(test.questions.map((q) => [q.id, grade?.final_marks[q.id] ?? 0]))
+    () => Object.fromEntries(questions.map((q) => [q.id, grade?.final_marks[q.id] ?? 0]))
   );
   const [busy, setBusy] = useState<'save' | 'ai' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // When a re-grade lands, show the new AI marks.
   useEffect(() => {
-    if (grade) setMarks(Object.fromEntries(test.questions.map((q) => [q.id, grade.final_marks[q.id] ?? 0])));
-  }, [grade, test.questions]);
+    if (grade) setMarks(Object.fromEntries(questions.map((q) => [q.id, grade.final_marks[q.id] ?? 0])));
+  }, [grade, questions]);
 
-  const { score, max, percent } = computeScore(test, marks);
+  const { score, max, percent } = computeScore(questions, marks);
   const answers = row.latest?.answers ?? {};
 
   return (
@@ -555,12 +627,12 @@ function ReviewModal({
           {!grade?.ai_graded_at && (
             <div className="itest-note">Not AI-graded yet. Run the AI or enter marks yourself.</div>
           )}
-          {test.questions.map((q, i) => {
+          {questions.map((q, i) => {
             const ai = grade?.ai_marks?.[q.id];
             return (
               <div key={q.id} className="itest-review-q">
                 <div className="flex items-center justify-between" style={{ gap: 8 }}>
-                  <strong>Q{i + 1}. {q.prompt}</strong>
+                  <strong>Q{i + 1}. {q.topic && <span className="itest-topic">{q.topic}</span>} {q.prompt}</strong>
                   <label className="text-sm" style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
                     <input className="auth-input" type="number" min={0} max={q.marks} step={0.5} style={{ width: 72, padding: '4px 8px' }}
                       value={marks[q.id] ?? 0}
@@ -568,15 +640,15 @@ function ReviewModal({
                     / {q.marks}
                   </label>
                 </div>
-                <div className="itest-review-cols">
+                <div className={test.mode === 'random' ? '' : 'itest-review-cols'}>
                   <div>
                     <div className="text-xs text-muted">Student answer</div>
                     <pre className="itest-code">{(answers[q.id] ?? '').trim() || '— no answer —'}</pre>
                   </div>
-                  <div>
-                    <div className="text-xs text-muted">Correct answer</div>
-                    <pre className="itest-code">{answerKey[q.id] ?? '—'}</pre>
-                  </div>
+                  {test.mode !== 'random' && <div>
+                    <div className="text-xs text-muted">Model answer (not used by AI)</div>
+                    <pre className="itest-code">{answerKey[q.id]?.trim() || '— none —'}</pre>
+                  </div>}
                 </div>
                 {ai && <p className="text-sm" style={{ margin: '4px 0 0' }}>🤖 AI: <strong>{ai.marks}/{ai.max}</strong> — {ai.feedback}</p>}
               </div>
@@ -601,6 +673,145 @@ function ReviewModal({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+const BUNDLE_EXAMPLE = `Topic: Primary Key
+1. Create table student with roll_no as primary key and name not null.
+2. Add a primary key on course_id to the existing table course.
+
+Topic: Foreign Key
+1. Create table marks where roll_no refers to the student table.
+2. Add a foreign key from orders(customer_id) to customers.
+
+Topic: CHECK
+1. Add a constraint so salary of an employee must be greater than 10000.`;
+
+function BundleEditor({
+  pool, setPool, bundleText, setBundleText, message, setMessage,
+  count, setCount, marksEach, setMarksEach, sample, setSample,
+}: {
+  pool: PoolQuestion[];
+  setPool: (p: PoolQuestion[]) => void;
+  bundleText: string;
+  setBundleText: (s: string) => void;
+  message: string | null;
+  setMessage: (s: string | null) => void;
+  count: string;
+  setCount: (s: string) => void;
+  marksEach: string;
+  setMarksEach: (s: string) => void;
+  sample: PoolQuestion[] | null;
+  setSample: (s: PoolQuestion[] | null) => void;
+}) {
+  const groups = groupByTopic(pool);
+  const cnt = Number(count) || 0;
+  const each = Number(marksEach) || 0;
+
+  const read = (append: boolean) => {
+    const parsed = parseQuestionBundle(bundleText);
+    if (parsed.length === 0) {
+      setMessage('No questions found. Put each topic on a line like “Topic: Primary Key” and its questions below it, one per line or numbered.');
+      return;
+    }
+    const next = append ? [...pool, ...parsed] : parsed;
+    setPool(next);
+    setBundleText('');
+    setMessage(`✓ Read ${parsed.length} question(s) in ${groupByTopic(parsed).length} topic(s). Check them below.`);
+  };
+
+  const patch = (id: string, prompt: string) => setPool(pool.map((q) => (q.id === id ? { ...q, prompt } : q)));
+  const remove = (id: string) => setPool(pool.filter((q) => q.id !== id));
+  const renameTopic = (from: string, to: string) => setPool(pool.map((q) => (q.topic === from ? { ...q, topic: to } : q)));
+
+  const rounds = groups.length ? Math.ceil(cnt / groups.length) : 0;
+
+  return (
+    <div className="lc-questions">
+      <label className="auth-field" style={{ marginTop: 16 }}>
+        <span>Paste your topic-wise questions {pool.length > 0 && <span className="text-muted" style={{ fontWeight: 400, textTransform: 'none' }}>(to add more or replace)</span>}</span>
+        <textarea
+          className="auth-input"
+          rows={pool.length ? 5 : 12}
+          value={bundleText}
+          onChange={(e) => setBundleText(e.target.value)}
+          placeholder={BUNDLE_EXAMPLE}
+        />
+      </label>
+      <div className="flex gap-8" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+        <button className="btn btn-primary btn-sm" type="button" disabled={!bundleText.trim()} onClick={() => read(false)}>
+          📥 {pool.length ? 'Replace with these questions' : 'Read questions'}
+        </button>
+        {pool.length > 0 && (
+          <button className="btn btn-ghost btn-sm" type="button" disabled={!bundleText.trim()} onClick={() => read(true)}>➕ Add to the bundle</button>
+        )}
+      </div>
+      {message && <div className="itest-note" style={{ marginTop: 8 }}>{message}</div>}
+
+      <div className="lc-grid" style={{ marginTop: 12 }}>
+        <label className="auth-field"><span>Questions per student</span>
+          <div className="flex gap-8 items-center">
+            <input className="auth-input" type="number" min={1} value={count} onChange={(e) => { setCount(e.target.value); setSample(null); }} style={{ maxWidth: 100 }} />
+            {[10, 15].map((n) => (
+              <button key={n} type="button" className={`btn btn-sm ${cnt === n ? 'btn-gold' : 'btn-ghost'}`} onClick={() => { setCount(String(n)); setSample(null); }}>{n}</button>
+            ))}
+          </div>
+        </label>
+        <label className="auth-field"><span>Marks per question</span>
+          <input className="auth-input" type="number" min={0.5} step={0.5} value={marksEach} onChange={(e) => setMarksEach(e.target.value)} style={{ maxWidth: 120 }} />
+        </label>
+      </div>
+
+      {pool.length > 0 && (
+        <div className={`itest-note ${cnt > pool.length ? 'itest-note-warn' : ''}`} style={{ marginTop: 12 }}>
+          {cnt > pool.length
+            ? <>⚠️ The bundle has only <strong>{pool.length}</strong> questions but each student needs <strong>{cnt}</strong>. Add questions or lower the number.</>
+            : <>
+                Bundle: <strong>{pool.length}</strong> questions in <strong>{groups.length}</strong> topics.
+                Each student gets <strong>{cnt}</strong> random questions × {each} marks = <strong>{cnt * each}</strong> marks
+                {' — '}{cnt <= groups.length
+                  ? `one from ${cnt} different topics.`
+                  : `one from every topic, then ${rounds > 2 ? 'more rounds' : 'a second round'} until ${cnt}.`}
+              </>}
+        </div>
+      )}
+
+      {pool.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <button className="btn btn-ghost btn-sm" type="button" onClick={() => setSample(pickSampleSet(pool, cnt))} disabled={cnt <= 0}>
+            🎲 {sample ? 'Pick another sample' : 'Preview a sample student set'}
+          </button>
+          {sample && (
+            <ol className="itest-sample">
+              {sample.map((q) => (
+                <li key={q.id}><span className="itest-topic">{q.topic}</span> {q.prompt}</li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+
+      {groups.map((g) => (
+        <div key={g.topic} className="lc-question">
+          <div className="flex items-center justify-between" style={{ marginBottom: 6, gap: 8 }}>
+            <input
+              className="auth-input itest-topic-input"
+              defaultValue={g.topic}
+              aria-label="Topic name"
+              onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== g.topic) renameTopic(g.topic, v); }}
+            />
+            <span className="text-xs text-muted">{g.questions.length} question{g.questions.length === 1 ? '' : 's'}</span>
+          </div>
+          {g.questions.map((q, i) => (
+            <div key={q.id} className="itest-pool-row">
+              <span className="lc-qnum">{i + 1}</span>
+              <textarea className="auth-input" rows={1} value={q.prompt} onChange={(e) => patch(q.id, e.target.value)} />
+              <button className="btn btn-ghost btn-sm" type="button" onClick={() => remove(q.id)} aria-label="Remove question">✕</button>
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

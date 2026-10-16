@@ -103,7 +103,19 @@ export interface InternalTestQuestion {
   id: string;
   prompt: string;
   marks: number;
+  topic?: string;          // set for questions picked from a topic bundle
 }
+
+// One question in a random test's topic bundle (Mam-only).
+export interface PoolQuestion {
+  id: string;
+  topic: string;
+  prompt: string;
+}
+
+// 'fixed'  → every student answers internal_tests.questions
+// 'random' → each student gets their own set picked from the bundle at start
+export type InternalTestMode = 'fixed' | 'random';
 
 export interface InternalTest {
   id: string;
@@ -111,11 +123,14 @@ export interface InternalTest {
   title: string;
   description: string;
   schema_sql: string;
-  questions: InternalTestQuestion[];
+  questions: InternalTestQuestion[];   // empty for random tests
   target_sections: string[];
   duration_minutes: number | null;
   published: boolean;
   results_released: boolean;
+  mode: InternalTestMode;
+  question_count: number | null;      // random: questions per student
+  marks_per_question: number | null;  // random: marks for each question
   created_at: string;
   updated_at: string;
 }
@@ -126,6 +141,7 @@ export interface InternalTestAttempt {
   user_id: string;
   attempt_no: number;
   answers: Record<string, string>;
+  questions: InternalTestQuestion[] | null; // this student's set (random tests)
   started_at: string;
   deadline_at: string | null;
   submitted_at: string | null;

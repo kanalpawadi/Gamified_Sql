@@ -5,6 +5,7 @@ import { CopyGuard } from '../components/CopyGuard';
 import { LeetCodeSchemaView } from '../components/LeetCodeSchemaView';
 import {
   listStudentTests, getMyTestState, startTest, saveTestAnswers, isAttemptClosed, testMaxScore,
+  testQuestionCount, questionsOf,
 } from './testsApi';
 
 const STARTER = '-- Write your answer here\n\n';
@@ -83,7 +84,8 @@ export function InternalTestsSection({
             <div className="card-header"><span aria-hidden>📝</span> Start “{confirmStart.title}”?</div>
             <div className="card-body">
               <ul className="itest-rules">
-                <li>{confirmStart.questions.length} question(s), {testMaxScore(confirmStart)} marks in total.</li>
+                <li>{testQuestionCount(confirmStart)} question(s), {testMaxScore(confirmStart)} marks in total.</li>
+                {confirmStart.mode === 'random' && <li>Your questions are picked at random — other students get different questions.</li>}
                 <li>{confirmStart.duration_minutes
                   ? <>You have <strong>{confirmStart.duration_minutes} minutes</strong>. The timer keeps running even if you close the page, and the test submits automatically when time is up.</>
                   : <>There is no time limit, but you must press <strong>Submit</strong> when you finish.</>}
@@ -158,7 +160,7 @@ export function InternalTestsSection({
                 <div className="lab-card-top">
                   {statusEl}
                   <span className="text-xs text-muted">
-                    {test.questions.length} Qs · {testMaxScore(test)} marks
+                    {testQuestionCount(test)} Qs · {testMaxScore(test)} marks
                     {test.duration_minutes ? ` · ⏱ ${test.duration_minutes} min` : ''}
                   </span>
                 </div>
@@ -203,7 +205,8 @@ function TestRunner({
   const [now, setNow] = useState(() => Date.now() + offset.current);
 
   answersRef.current = answers;
-  const q = test.questions[qIndex];
+  const questions = questionsOf(test, attempt);
+  const q = questions[qIndex];
   const deadline = attempt.deadline_at ? new Date(attempt.deadline_at).getTime() : null;
   const remaining = deadline != null ? deadline - now : null;
 
@@ -270,7 +273,7 @@ function TestRunner({
     const v = (answers[id] ?? '').replace(/--[^\n]*/g, '').trim();
     return v.length > 0;
   };
-  const unanswered = test.questions.filter((x) => !answered(x.id)).length;
+  const unanswered = questions.filter((x) => !answered(x.id)).length;
 
   const submit = async () => {
     const msg = unanswered > 0
@@ -323,7 +326,7 @@ function TestRunner({
       {error && <div className="auth-error" role="alert" style={{ margin: '8px 0' }}>⚠️ {error}</div>}
 
       <div className="lab-qnav">
-        {test.questions.map((tq, i) => (
+        {questions.map((tq, i) => (
           <button
             key={tq.id}
             className={`lab-qchip ${i === qIndex ? 'active' : ''} ${answered(tq.id) ? 'done' : ''}`}
@@ -334,7 +337,7 @@ function TestRunner({
           </button>
         ))}
         <span className="text-xs text-muted" style={{ marginLeft: 8 }}>
-          {test.questions.length - unanswered}/{test.questions.length} answered
+          {questions.length - unanswered}/{questions.length} answered
         </span>
       </div>
 
@@ -343,7 +346,8 @@ function TestRunner({
           <div className="lab-solver-left">
             <CopyGuard className="ledger-card card">
               <div className="card-header">
-                <span aria-hidden>📋</span> Question {qIndex + 1} of {test.questions.length}
+                <span aria-hidden>📋</span> Question {qIndex + 1} of {questions.length}
+                {q.topic && <span className="itest-topic" style={{ marginLeft: 8 }}>{q.topic}</span>}
                 <span className="shortcut-hint">{q.marks} mark{q.marks === 1 ? '' : 's'}</span>
               </div>
               <div className="card-body">
@@ -376,7 +380,7 @@ function TestRunner({
             </div>
             <div className="flex gap-8" style={{ justifyContent: 'space-between', marginTop: 12 }}>
               <button className="btn btn-ghost btn-sm" disabled={qIndex === 0} onClick={() => goTo(qIndex - 1)}>← Previous</button>
-              {qIndex < test.questions.length - 1
+              {qIndex < questions.length - 1
                 ? <button className="btn btn-primary btn-sm" onClick={() => goTo(qIndex + 1)}>Next →</button>
                 : <button className="btn btn-gold btn-sm" onClick={submit} disabled={submitting}>Submit test</button>}
             </div>
@@ -413,7 +417,7 @@ function ResultView({
         </div></div>
       </div>
 
-      {test.questions.map((q, i) => {
+      {questionsOf(test, attempt).map((q, i) => {
         const m = grade.final_marks[q.id] ?? 0;
         const feedback = grade.ai_marks?.[q.id]?.feedback;
         return (

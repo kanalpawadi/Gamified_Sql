@@ -1,19 +1,37 @@
 import { supabase } from '../lib/supabaseClient';
 import type {
-  InternalTest, InternalTestAttempt, InternalTestGrade, InternalTestQuestion, Profile,
+  InternalTest, InternalTestAttempt, InternalTestGrade, InternalTestMode, InternalTestQuestion,
+  PoolQuestion, Profile,
 } from '../lib/types';
 import { labAssignedToSection } from '../labs/labsApi';
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
 
-export function testMaxScore(test: Pick<InternalTest, 'questions'>): number {
-  return test.questions.reduce((n, q) => n + (Number(q.marks) || 0), 0);
+function sumMarks(questions: InternalTestQuestion[]): number {
+  return questions.reduce((n, q) => n + (Number(q.marks) || 0), 0);
+}
+
+/** Questions per student. */
+export function testQuestionCount(test: InternalTest): number {
+  return test.mode === 'random' ? test.question_count ?? 0 : test.questions.length;
+}
+
+/** Total marks a student can score. */
+export function testMaxScore(test: InternalTest): number {
+  return test.mode === 'random'
+    ? (test.question_count ?? 0) * (Number(test.marks_per_question) || 0)
+    : sumMarks(test.questions);
+}
+
+/** The questions this attempt answers: the student's own set for random tests. */
+export function questionsOf(test: InternalTest, attempt: InternalTestAttempt | null | undefined): InternalTestQuestion[] {
+  return attempt?.questions ?? test.questions;
 }
 
 /** Score + percentage (2 dp) from per-question marks, clamped to each max. */
-export function computeScore(test: Pick<InternalTest, 'questions'>, marks: Record<string, number>) {
-  const max = testMaxScore(test);
-  const score = test.questions.reduce((n, q) => {
+export function computeScore(questions: InternalTestQuestion[], marks: Record<string, number>) {
+  const max = sumMarks(questions);
+  const score = questions.reduce((n, q) => {
     const m = Number(marks[q.id]) || 0;
     return n + Math.min(Math.max(m, 0), Number(q.marks) || 0);
   }, 0);
@@ -95,6 +113,106 @@ export interface TestDraft {
   target_sections: string[];
   duration_minutes: number | null;
   published: boolean;
+  mode: InternalTestMode;
+  question_count: number | null;
+  marks_per_question: number | null;
+}
+
+export async function getTestPool(testId: string): Promise<PoolQuestion[]> {
+  const { data, error } = await supabase
+    .from('internal_test_pools')
+    .select('questions')
+    .eq('test_id', testId)
+    .maybeSingle();
+  if (error) console.error('getTestPool:', error.message);
+  return (data?.questions as PoolQuestion[]) ?? [];
+}
+
+// ── Topic bundle parsing + sample sets ─────────────────────────────────────
+
+const TOPIC_LINE = /^\s*(?:#{1,6}\s*(.+?)|(?:topic|unit|chapter)\s*\d*\s*[:\-–—.)]\s*(.+?))\s*:?\s*$/i;
+const NUMBERED_LINE = /^\s*(?:q\s*)?(?:\d{1,3}|[a-z])\s*[.):\]]\s+/i;
+const BULLET_LINE = /^\s*[-*•●▪]\s+/;
+
+/**
+ * Parses Mam's pasted bundle:
+ *   Topic: Primary Key            (also "# Primary Key", "Unit 2: Joins")
+ *   1. Create table student …     (numbered/bulleted, may wrap onto more lines)
+ *   2. Add a primary key …
+ * Within a topic that uses numbers/bullets, un-numbered lines continue the
+ * previous question; otherwise every non-empty line is its own question.
+ * Questions before any topic heading go under "General".
+ */
+export function parseQuestionBundle(text: string): PoolQuestion[] {
+  const blocks: { topic: string; lines: string[] }[] = [];
+  let cur = { topic: 'General', lines: [] as string[] };
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(TOPIC_LINE);
+    if (m) {
+      if (cur.lines.some((l) => l.trim())) blocks.push(cur);
+      cur = { topic: (m[1] ?? m[2]).trim(), lines: [] };
+    } else {
+      cur.lines.push(line);
+    }
+  }
+  if (cur.lines.some((l) => l.trim())) blocks.push(cur);
+
+  const out: PoolQuestion[] = [];
+  const seen = new Set<string>();
+  const push = (topic: string, prompt: string) => {
+    const p = prompt.replace(/\s+/g, ' ').trim();
+    const key = `${topic.toLowerCase()}|${p.toLowerCase()}`;
+    if (p.length < 3 || seen.has(key)) return;
+    seen.add(key);
+    out.push({ id: crypto.randomUUID(), topic, prompt: p });
+  };
+
+  for (const b of blocks) {
+    const numbered = b.lines.some((l) => NUMBERED_LINE.test(l) || BULLET_LINE.test(l));
+    if (!numbered) {
+      for (const l of b.lines) if (l.trim()) push(b.topic, l);
+      continue;
+    }
+    let q: string | null = null;
+    for (const l of b.lines) {
+      if (NUMBERED_LINE.test(l) || BULLET_LINE.test(l)) {
+        if (q) push(b.topic, q);
+        q = l.replace(NUMBERED_LINE, '').replace(BULLET_LINE, '');
+      } else if (l.trim()) {
+        q = q ? `${q} ${l.trim()}` : l;
+      }
+    }
+    if (q) push(b.topic, q);
+  }
+  return out;
+}
+
+/** Topics in first-seen order with their questions. */
+export function groupByTopic(pool: PoolQuestion[]): { topic: string; questions: PoolQuestion[] }[] {
+  const map = new Map<string, PoolQuestion[]>();
+  for (const q of pool) map.set(q.topic, [...(map.get(q.topic) ?? []), q]);
+  return [...map.entries()].map(([topic, questions]) => ({ topic, questions }));
+}
+
+/**
+ * Same rule the server uses when a student starts (for Mam's preview):
+ * one random question from each topic (topics in random order), then a
+ * second round, … until `count` questions are picked.
+ */
+export function pickSampleSet(pool: PoolQuestion[], count: number): PoolQuestion[] {
+  const shuffle = <T,>(a: T[]) => {
+    const r = [...a];
+    for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r[i], r[j]] = [r[j], r[i]]; }
+    return r;
+  };
+  const topics = shuffle(groupByTopic(pool)).map((g) => shuffle(g.questions));
+  const picked: PoolQuestion[] = [];
+  for (let round = 0; picked.length < count; round++) {
+    const layer = topics.filter((t) => t.length > round).map((t) => t[round]);
+    if (layer.length === 0) break;
+    picked.push(...layer.slice(0, count - picked.length));
+  }
+  return picked;
 }
 
 export async function listAllTests(): Promise<InternalTest[]> {
@@ -117,7 +235,7 @@ export async function getTestKey(testId: string): Promise<Record<string, string>
 }
 
 export async function saveTest(
-  draft: TestDraft, answers: Record<string, string>, existingId?: string,
+  draft: TestDraft, answers: Record<string, string>, existingId?: string, pool?: PoolQuestion[],
 ): Promise<{ id?: string; error?: string }> {
   let id = existingId;
   if (id) {
@@ -130,6 +248,13 @@ export async function saveTest(
     const { data, error } = await supabase.from('internal_tests').insert(draft).select('id').single();
     if (error) return { error: error.message };
     id = data.id as string;
+  }
+  if (draft.mode === 'random') {
+    const { error: poolErr } = await supabase
+      .from('internal_test_pools')
+      .upsert({ test_id: id, questions: pool ?? [] }, { onConflict: 'test_id' });
+    if (poolErr) return { error: `Test saved but question bundle failed: ${poolErr.message}` };
+    return { id };
   }
   const { error: keyErr } = await supabase
     .from('internal_test_keys')
@@ -241,9 +366,9 @@ export async function gradeAttemptWithAI(attemptId: string): Promise<{
 
 /** Mam approves (optionally adjusted) marks for an attempt. */
 export async function saveReview(
-  test: InternalTest, attemptId: string, finalMarks: Record<string, number>, reviewerId: string,
+  questions: InternalTestQuestion[], attemptId: string, finalMarks: Record<string, number>, reviewerId: string,
 ): Promise<{ grade?: InternalTestGrade; error?: string }> {
-  const { score, max, percent } = computeScore(test, finalMarks);
+  const { score, max, percent } = computeScore(questions, finalMarks);
   const { data, error } = await supabase
     .from('internal_test_grades')
     .upsert({
@@ -260,7 +385,9 @@ export async function saveReview(
 }
 
 export function exportTestResultsCSV(test: InternalTest, rows: TestResultRow[]) {
-  const qHeaders = test.questions.map((q, i) => `Q${i + 1} (/${q.marks})`);
+  // Per-question columns by position (random tests give each student a different set).
+  const n = Math.max(testQuestionCount(test), ...rows.map((r) => questionsOf(test, r.latest).length));
+  const qHeaders = Array.from({ length: n }, (_, i) => `Q${i + 1}`);
   const headers = ['Student Name', 'PRN', 'Section', 'Status', 'Attempts', ...qHeaders,
     `Score (/${testMaxScore(test)})`, 'Percentage', 'Reviewed'];
   const lines = rows.map((r) => {
@@ -268,7 +395,10 @@ export function exportTestResultsCSV(test: InternalTest, rows: TestResultRow[]) 
     const status = !r.latest ? 'Not attempted' : !isAttemptClosed(r.latest) ? 'In progress' : 'Submitted';
     return [
       r.student.full_name, r.student.prn ?? '', r.student.class_section ?? '', status, String(r.attempts.length),
-      ...test.questions.map((q) => (g && g.final_marks[q.id] != null ? String(g.final_marks[q.id]) : '')),
+      ...Array.from({ length: n }, (_, i) => {
+        const q = questionsOf(test, r.latest)[i];
+        return q && g && g.final_marks[q.id] != null ? `${g.final_marks[q.id]}/${q.marks}` : '';
+      }),
       g ? String(g.score) : '', g ? `${g.percent}%` : '', g?.reviewed_at ? 'Yes' : 'No',
     ];
   });
