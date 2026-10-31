@@ -248,10 +248,10 @@ export async function deleteStudentAccount(
 export async function getStudentsOverview(): Promise<StudentOverview[]> {
   const deletedSet = getDeletedStudentIds();
   // Class-wide tables exceed Supabase's 1000-row cap — page through them.
-  const [profilesRes, attemptsRes, certsRes, badgesRes, labsRes] = await Promise.all([
+  // Solved/attempted counts come pre-aggregated from the database.
+  const [profilesRes, attemptCounts, certsRes, badgesRes, labsRes] = await Promise.all([
     fetchAllRows<Profile>((from, to, withCount) => supabase.from('profiles').select('*', withCount ? { count: 'exact' } : undefined).eq('role', 'student').order('id').range(from, to)),
-    fetchAllRows<{ user_id: string; question_id: string; passed: boolean }>((from, to, withCount) =>
-      supabase.from('question_attempts').select('user_id, question_id, passed', withCount ? { count: 'exact' } : undefined).order('id').range(from, to)),
+    getAttemptCounts(),
     fetchAllRows<{ user_id: string; cert_type: string; lab_id: string | null }>((from, to, withCount) =>
       supabase.from('certificates').select('user_id, cert_type, lab_id', withCount ? { count: 'exact' } : undefined).order('id').range(from, to)),
     fetchAllRows<{ user_id: string }>((from, to, withCount) => supabase.from('badges').select('user_id', withCount ? { count: 'exact' } : undefined).order('id').range(from, to)),
@@ -259,24 +259,11 @@ export async function getStudentsOverview(): Promise<StudentOverview[]> {
   ]);
 
   if (profilesRes.error) { console.error(profilesRes.error); return []; }
-  for (const r of [attemptsRes, certsRes, badgesRes]) if (r.error) console.error('getStudentsOverview:', r.error);
+  for (const r of [certsRes, badgesRes]) if (r.error) console.error('getStudentsOverview:', r.error);
   const profiles = ((profilesRes.data ?? []) as Profile[]).filter((p) => !deletedSet.has(p.id));
-  const attempts = attemptsRes.data ?? [];
   const certs = certsRes.data ?? [];
   const badges = badgesRes.data ?? [];
   const labs = (labsRes.data ?? []) as { target_sections: string[] }[];
-
-  // Per-user aggregation of attempts.
-  const solvedByUser = new Map<string, Set<string>>();
-  const attemptedByUser = new Map<string, Set<string>>();
-  for (const a of attempts) {
-    if (!attemptedByUser.has(a.user_id)) attemptedByUser.set(a.user_id, new Set());
-    attemptedByUser.get(a.user_id)!.add(a.question_id);
-    if (a.passed) {
-      if (!solvedByUser.has(a.user_id)) solvedByUser.set(a.user_id, new Set());
-      solvedByUser.get(a.user_id)!.add(a.question_id);
-    }
-  }
 
   const labsCompletedByUser = new Map<string, Set<string>>();
   for (const c of certs) {
@@ -294,8 +281,8 @@ export async function getStudentsOverview(): Promise<StudentOverview[]> {
 
   return profiles
     .map<StudentOverview>((p) => {
-      const solved = solvedByUser.get(p.id)?.size ?? 0;
-      const attempted = attemptedByUser.get(p.id)?.size ?? 0;
+      const solved = attemptCounts.get(p.id)?.solved ?? 0;
+      const attempted = attemptCounts.get(p.id)?.attempted ?? 0;
       return {
         id: p.id,
         fullName: p.full_name || '(no name)',
@@ -315,26 +302,100 @@ export async function getStudentsOverview(): Promise<StudentOverview[]> {
     .sort((a, b) => b.solved - a.solved);
 }
 
+/**
+ * Distinct questions solved / attempted per student. Uses the database
+ * summary (migration 0011) — one small request; falls back to downloading
+ * every attempt if that function isn't installed yet.
+ */
+async function getAttemptCounts(): Promise<Map<string, { solved: number; attempted: number }>> {
+  const out = new Map<string, { solved: number; attempted: number }>();
+  const { data, error } = await supabase.rpc('mam_attempt_summary');
+  if (!error) {
+    for (const r of (data ?? []) as { user_id: string; solved: number; attempted: number }[]) {
+      out.set(r.user_id, { solved: r.solved, attempted: r.attempted });
+    }
+    return out;
+  }
+  console.warn('mam_attempt_summary unavailable, using slow path:', error.message);
+  const res = await fetchAllRows<{ user_id: string; question_id: string; passed: boolean }>((from, to, withCount) =>
+    supabase.from('question_attempts').select('user_id, question_id, passed', withCount ? { count: 'exact' } : undefined).order('id').range(from, to));
+  if (res.error) console.error('getAttemptCounts:', res.error);
+  const solved = new Map<string, Set<string>>();
+  const attempted = new Map<string, Set<string>>();
+  for (const a of res.data) {
+    if (!attempted.has(a.user_id)) attempted.set(a.user_id, new Set());
+    attempted.get(a.user_id)!.add(a.question_id);
+    if (a.passed) {
+      if (!solved.has(a.user_id)) solved.set(a.user_id, new Set());
+      solved.get(a.user_id)!.add(a.question_id);
+    }
+  }
+  for (const [u, set] of attempted) out.set(u, { solved: solved.get(u)?.size ?? 0, attempted: set.size });
+  return out;
+}
+
 export async function getStudentLabCompletions(): Promise<StudentLabRecord[]> {
   const deletedSet = getDeletedStudentIds();
-  // lab_submissions grows past Supabase's 1000-row cap quickly (every Run is a
-  // row) — a single select silently dropped older passes, so students who had
-  // finished showed as "In Progress"/"Not Started". Page through everything.
-  const [profilesRes, labsRes, subsRes] = await Promise.all([
+  const [profilesRes, labsRes, progress] = await Promise.all([
     fetchAllRows<Profile>((from, to, withCount) => supabase.from('profiles').select('*', withCount ? { count: 'exact' } : undefined).eq('role', 'student').order('id').range(from, to)),
     supabase.from('lab_experiments').select('*'),
-    fetchAllRows<LabSubmission>((from, to, withCount) =>
-      supabase.from('lab_submissions').select('*', withCount ? { count: 'exact' } : undefined).order('created_at', { ascending: false }).order('id').range(from, to)),
+    getLabProgress(),
   ]);
 
-  if (profilesRes.error || labsRes.error || subsRes.error) {
-    console.error('getStudentLabCompletions error:', profilesRes.error || labsRes.error?.message || subsRes.error);
-    if (profilesRes.error || labsRes.error) return [];
+  if (profilesRes.error || labsRes.error) {
+    console.error('getStudentLabCompletions error:', profilesRes.error || labsRes.error?.message);
+    return [];
   }
 
   const approvedProfiles = profilesRes.data
     .filter((p) => !deletedSet.has(p.id) && getEffectiveApproval(p));
-  return buildLabRecords(approvedProfiles, (labsRes.data ?? []) as LabExperiment[], subsRes.data);
+  return buildLabRecords(approvedProfiles, (labsRes.data ?? []) as LabExperiment[], progress);
+}
+
+/** One row per (student, lab): what the Submissions table needs. */
+export interface LabProgressRow {
+  user_id: string;
+  lab_id: string;
+  passed_question_ids: string[];
+  submission_count: number;
+  last_submitted_at: string | null;
+  latest_sql: string | null;
+}
+
+/**
+ * Per (student, lab) progress. Uses the database summary (migration 0011) —
+ * one small request instead of downloading every submission with its SQL
+ * (~23,500 rows, 15–25 s on the live project). Falls back to the slow path if
+ * the function isn't installed yet.
+ */
+async function getLabProgress(): Promise<LabProgressRow[]> {
+  const { data, error } = await supabase.rpc('mam_lab_progress');
+  if (!error) return (data ?? []) as LabProgressRow[];
+  console.warn('mam_lab_progress unavailable, using slow path:', error.message);
+  const subs = await fetchAllRows<LabSubmission>((from, to, withCount) =>
+    supabase.from('lab_submissions').select('*', withCount ? { count: 'exact' } : undefined).order('created_at', { ascending: false }).order('id').range(from, to));
+  if (subs.error) console.error('getLabProgress:', subs.error);
+  return summarizeSubmissions(subs.data);
+}
+
+/** Same result as mam_lab_progress(), computed in the browser (fallback + tests). */
+export function summarizeSubmissions(subs: LabSubmission[]): LabProgressRow[] {
+  const map = new Map<string, LabProgressRow & { _passed: Set<string> }>();
+  for (const s of subs) {
+    const key = `${s.user_id}_${s.lab_id}`;
+    let row = map.get(key);
+    if (!row) {
+      row = { user_id: s.user_id, lab_id: s.lab_id, passed_question_ids: [], submission_count: 0, last_submitted_at: null, latest_sql: null, _passed: new Set() };
+      map.set(key, row);
+    }
+    row.submission_count++;
+    if (s.passed) row._passed.add(s.question_id);
+    if (!row.last_submitted_at || s.created_at > row.last_submitted_at) {
+      row.last_submitted_at = s.created_at;
+      row.latest_sql = s.submitted_sql;
+    }
+  }
+  return [...map.values()].map(({ _passed, ...r }) => ({ ...r, passed_question_ids: [..._passed] }));
 }
 
 /** Display form of a submitted query: drops the editor's starter comments. */
@@ -356,37 +417,29 @@ export function cleanSubmittedSql(sql: string | null): string | null {
  *   skipped unless the student already has submissions for them.
  */
 export function buildLabRecords(
-  profiles: Profile[], labs: LabExperiment[], subs: LabSubmission[],
+  profiles: Profile[], labs: LabExperiment[], progress: LabProgressRow[],
 ): StudentLabRecord[] {
-  const submissionsGrouped = new Map<string, LabSubmission[]>();
-  for (const s of subs) {
-    const key = `${s.user_id}_${s.lab_id}`;
-    if (!submissionsGrouped.has(key)) submissionsGrouped.set(key, []);
-    submissionsGrouped.get(key)!.push(s);
-  }
-  // Newest first, regardless of the order rows arrived in.
-  for (const list of submissionsGrouped.values()) list.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const byKey = new Map<string, LabProgressRow>();
+  for (const r of progress) byKey.set(`${r.user_id}_${r.lab_id}`, r);
 
   const records: StudentLabRecord[] = [];
 
   for (const p of profiles) {
     for (const lab of labs) {
-      const userSubs = submissionsGrouped.get(`${p.id}_${lab.id}`) ?? [];
+      const row = byKey.get(`${p.id}_${lab.id}`);
       const relevant = lab.published && labAssignedToSection(lab.target_sections, p.class_section);
-      if (!relevant && userSubs.length === 0) continue;
+      if (!relevant && !row) continue;
 
-      const passedQuestions = new Set(userSubs.filter((s) => s.passed).map((s) => s.question_id));
+      const passedQuestions = new Set(row?.passed_question_ids ?? []);
       const solvedCount = lab.questions.filter((q) => passedQuestions.has(q.id)).length;
       const totalQuestions = lab.questions.length;
 
       let status: StudentLabRecord['status'] = 'Not Started';
       if (totalQuestions > 0 && solvedCount === totalQuestions) {
         status = 'Completed';
-      } else if (userSubs.length > 0) {
+      } else if (row && row.submission_count > 0) {
         status = 'In Progress';
       }
-
-      const lastSub = userSubs[0];
 
       records.push({
         userId: p.id,
@@ -398,8 +451,8 @@ export function buildLabRecords(
         status,
         solvedCount,
         totalQuestions,
-        lastSubmittedAt: lastSub?.created_at ?? null,
-        latestSql: cleanSubmittedSql(lastSub?.submitted_sql ?? null),
+        lastSubmittedAt: row?.last_submitted_at ?? null,
+        latestSql: cleanSubmittedSql(row?.latest_sql ?? null),
       });
     }
   }
