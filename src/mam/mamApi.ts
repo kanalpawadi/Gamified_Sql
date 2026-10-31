@@ -249,12 +249,12 @@ export async function getStudentsOverview(): Promise<StudentOverview[]> {
   const deletedSet = getDeletedStudentIds();
   // Class-wide tables exceed Supabase's 1000-row cap — page through them.
   const [profilesRes, attemptsRes, certsRes, badgesRes, labsRes] = await Promise.all([
-    fetchAllRows<Profile>((from, to) => supabase.from('profiles').select('*').eq('role', 'student').order('id').range(from, to)),
-    fetchAllRows<{ user_id: string; question_id: string; passed: boolean }>((from, to) =>
-      supabase.from('question_attempts').select('user_id, question_id, passed').order('id').range(from, to)),
-    fetchAllRows<{ user_id: string; cert_type: string; lab_id: string | null }>((from, to) =>
-      supabase.from('certificates').select('user_id, cert_type, lab_id').order('id').range(from, to)),
-    fetchAllRows<{ user_id: string }>((from, to) => supabase.from('badges').select('user_id').order('id').range(from, to)),
+    fetchAllRows<Profile>((from, to, withCount) => supabase.from('profiles').select('*', withCount ? { count: 'exact' } : undefined).eq('role', 'student').order('id').range(from, to)),
+    fetchAllRows<{ user_id: string; question_id: string; passed: boolean }>((from, to, withCount) =>
+      supabase.from('question_attempts').select('user_id, question_id, passed', withCount ? { count: 'exact' } : undefined).order('id').range(from, to)),
+    fetchAllRows<{ user_id: string; cert_type: string; lab_id: string | null }>((from, to, withCount) =>
+      supabase.from('certificates').select('user_id, cert_type, lab_id', withCount ? { count: 'exact' } : undefined).order('id').range(from, to)),
+    fetchAllRows<{ user_id: string }>((from, to, withCount) => supabase.from('badges').select('user_id', withCount ? { count: 'exact' } : undefined).order('id').range(from, to)),
     supabase.from('lab_experiments').select('target_sections').eq('published', true),
   ]);
 
@@ -321,10 +321,10 @@ export async function getStudentLabCompletions(): Promise<StudentLabRecord[]> {
   // row) — a single select silently dropped older passes, so students who had
   // finished showed as "In Progress"/"Not Started". Page through everything.
   const [profilesRes, labsRes, subsRes] = await Promise.all([
-    fetchAllRows<Profile>((from, to) => supabase.from('profiles').select('*').eq('role', 'student').order('id').range(from, to)),
+    fetchAllRows<Profile>((from, to, withCount) => supabase.from('profiles').select('*', withCount ? { count: 'exact' } : undefined).eq('role', 'student').order('id').range(from, to)),
     supabase.from('lab_experiments').select('*'),
-    fetchAllRows<LabSubmission>((from, to) =>
-      supabase.from('lab_submissions').select('*').order('created_at', { ascending: false }).order('id').range(from, to)),
+    fetchAllRows<LabSubmission>((from, to, withCount) =>
+      supabase.from('lab_submissions').select('*', withCount ? { count: 'exact' } : undefined).order('created_at', { ascending: false }).order('id').range(from, to)),
   ]);
 
   if (profilesRes.error || labsRes.error || subsRes.error) {

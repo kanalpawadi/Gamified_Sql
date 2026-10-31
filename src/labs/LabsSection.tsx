@@ -10,10 +10,9 @@ import { CopyGuard } from '../components/CopyGuard';
 import { LeetCodeSchemaView } from '../components/LeetCodeSchemaView';
 import { LeetCodeResultsView } from '../components/LeetCodeResultsView';
 import {
-  listStudentLabs, getMyLabSubmissions, recordLabSubmission, awardLabCompletion,
+  listStudentLabs, getMyLabSubmissions, getMyPassedByLab, recordLabSubmission, awardLabCompletion,
   normalizeSqlForMatch,
 } from './labsApi';
-import { generateLabReportPdf } from './generateLabReport';
 import { useAuth } from '../auth/AuthContext';
 import { InternalTestsSection } from '../tests/InternalTestsSection';
 
@@ -42,13 +41,8 @@ export function LabsSection({
     }
     const list = await listStudentLabs(section, isApproved);
     setLabs(list);
-    // Load passed-state for each lab so the list can show progress.
-    const map: Record<string, Set<string>> = {};
-    for (const lab of list) {
-      const subs = await getMyLabSubmissions(lab.id);
-      map[lab.id] = new Set(subs.filter((s) => s.passed).map((s) => s.question_id));
-    }
-    setPassedByLab(map);
+    // Passed-state for every lab in a single request, so the list can show progress.
+    setPassedByLab(await getMyPassedByLab(list.map((lab) => lab.id)));
   }, [section, isApproved]);
 
   useEffect(() => { refreshLabs(); }, [refreshLabs]);
@@ -264,7 +258,11 @@ function LabSolver({
   const downloadReport = useCallback(async () => {
     setDownloading(true);
     try {
-      const submissions = await getMyLabSubmissions(lab.id);
+      // PDF code is loaded only when needed (keeps jsPDF out of the main bundle).
+      const [submissions, { generateLabReportPdf }] = await Promise.all([
+        getMyLabSubmissions(lab.id),
+        import('./generateLabReport'),
+      ]);
       generateLabReportPdf({
         lab,
         submissions,

@@ -1,6 +1,17 @@
 import { supabase } from '../lib/supabaseClient';
 import type { LabExperiment, LabQuestion, LabSubmission } from '../lib/types';
 import type { Domain } from '../data/domains';
+import { fetchAllRows } from '../lib/fetchAllRows';
+
+/**
+ * Current user id from the locally stored session — no network round trip
+ * (auth.getUser() calls the auth server every time, ~0.5 s each). RLS still
+ * verifies the JWT on every request, so this is only used to scope queries.
+ */
+async function currentUserId(): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.user.id ?? null;
+}
 
 /**
  * Normalizes a SQL statement for 'statement'-mode grading (text match): strips
@@ -47,16 +58,39 @@ export async function listStudentLabs(section: string | null, isApproved: boolea
 
 export async function getMyLabSubmissions(labId: string): Promise<LabSubmission[]> {
   // Explicitly scope to the current user so this works regardless of RLS config.
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
-  const { data, error } = await supabase
+  const userId = await currentUserId();
+  if (!userId) return [];
+  const { data, error } = await fetchAllRows<LabSubmission>((from, to, withCount) => supabase
     .from('lab_submissions')
-    .select('*')
+    .select('*', withCount ? { count: 'exact' } : undefined)
     .eq('lab_id', labId)
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false });
-  if (error) { console.error('getMyLabSubmissions:', error.message); return []; }
-  return data as LabSubmission[];
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .order('id')
+    .range(from, to));
+  if (error) { console.error('getMyLabSubmissions:', error); return []; }
+  return data;
+}
+
+/**
+ * Passed question ids per lab for the current user, for ALL given labs in one
+ * request (the lab list used to make two requests per lab, one after another).
+ */
+export async function getMyPassedByLab(labIds: string[]): Promise<Record<string, Set<string>>> {
+  const map: Record<string, Set<string>> = Object.fromEntries(labIds.map((id) => [id, new Set<string>()]));
+  const userId = await currentUserId();
+  if (!userId || labIds.length === 0) return map;
+  const { data, error } = await fetchAllRows<{ lab_id: string; question_id: string }>((from, to, withCount) => supabase
+    .from('lab_submissions')
+    .select('lab_id, question_id', withCount ? { count: 'exact' } : undefined)
+    .eq('user_id', userId)
+    .eq('passed', true)
+    .in('lab_id', labIds)
+    .order('id')
+    .range(from, to));
+  if (error) console.error('getMyPassedByLab:', error);
+  for (const r of data) map[r.lab_id]?.add(r.question_id);
+  return map;
 }
 
 export async function recordLabSubmission(p: {
@@ -64,10 +98,10 @@ export async function recordLabSubmission(p: {
 }): Promise<void> {
   // Explicitly include user_id so submissions are correctly linked on deployed
   // instances where RLS auth.uid() triggers may not automatically populate it.
-  const { data: { user } } = await supabase.auth.getUser();
+  const userId = await currentUserId();
   const { error } = await supabase.from('lab_submissions').insert({
     lab_id: p.labId, question_id: p.questionId, passed: p.passed, submitted_sql: p.sql,
-    ...(user ? { user_id: user.id } : {}),
+    ...(userId ? { user_id: userId } : {}),
   });
   if (error) console.error('recordLabSubmission:', error.message);
 }

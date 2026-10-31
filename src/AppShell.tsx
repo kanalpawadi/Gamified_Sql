@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import './index.css';
 import { useAuth } from './auth/AuthContext';
 import { LoginView } from './auth/LoginView';
-import { MamDashboard } from './mam/MamDashboard';
 import { StudentApp } from './App';
+
+// Teacher-only code: students never download it.
+const MamDashboard = lazy(() => import('./mam/MamDashboard').then((m) => ({ default: m.MamDashboard })));
 
 function FullLoader({ label, onEscape }: { label: string; onEscape?: () => void }) {
   return (
@@ -53,7 +55,11 @@ export default function AppShell() {
   }
 
   if (profile.role === 'mam') {
-    return <MamDashboard />;
+    return (
+      <Suspense fallback={<FullLoader label="Loading Teacher Dashboard…" />}>
+        <MamDashboard />
+      </Suspense>
+    );
   }
 
   return <StudentApp />;

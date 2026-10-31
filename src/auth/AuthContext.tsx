@@ -81,19 +81,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (active) setInitializing(false);
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, s) => {
+    // Synchronous callback: never await Supabase calls inside it (supabase-js
+    // can deadlock on a nested refresh during TOKEN_REFRESHED). Token refreshes
+    // and tab re-focus re-emit events for the same user — don't refetch then.
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
       if (!active) return;
       setSession(s);
       const uid = s?.user?.id ?? null;
-      if (uid) {
-        lastUserId.current = uid;
-        const prof = await fetchProfile(uid);
-        if (!active) return;
-        setProfile(prof);
-      } else {
+      if (!uid) {
         lastUserId.current = null;
         setProfile(null);
+        return;
       }
+      if (uid === lastUserId.current && event !== 'USER_UPDATED') return;
+      lastUserId.current = uid;
+      setTimeout(() => {
+        fetchProfile(uid).then((prof) => { if (active && lastUserId.current === uid) setProfile(prof); });
+      }, 0);
     });
 
     return () => { active = false; sub.subscription.unsubscribe(); };

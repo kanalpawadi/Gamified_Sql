@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import type { CertificateRow } from '../lib/types';
 import { MILESTONE_CERTS } from '../progress/progressApi';
-import { generateCertificatePdf } from './generateCertificate';
 
 export function CertificatesSection({
   fullName,
@@ -47,13 +46,17 @@ export function CertificatesSection({
                 <p className="cert-meta">Issued {new Date(c.issued_at).toLocaleDateString()}</p>
                 <button
                   className="btn btn-gold btn-sm"
-                  onClick={() => generateCertificatePdf({
-                    recipientName: fullName,
-                    prn: prn,
-                    title: c.title,
-                    certType: c.cert_type,
-                    issuedAt: c.issued_at,
-                  })}
+                  onClick={async () => {
+                    // PDF + QR code libraries load only when a certificate is downloaded.
+                    const { generateCertificatePdf } = await import('./generateCertificate');
+                    await generateCertificatePdf({
+                      recipientName: fullName,
+                      prn: prn,
+                      title: c.title,
+                      certType: c.cert_type,
+                      issuedAt: c.issued_at,
+                    });
+                  }}
                 >
                   ⬇ Download PDF
                 </button>

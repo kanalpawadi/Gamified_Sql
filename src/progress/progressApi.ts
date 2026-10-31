@@ -50,9 +50,9 @@ export async function loadProgress(userId: string): Promise<DerivedProgress> {
   // select would silently drop their NEWEST attempts.
   const { data, error } = await fetchAllRows<{
     question_id: string; category: string | null; tags: string[] | null; passed: boolean; created_at: string;
-  }>((from, to) => supabase
+  }>((from, to, withCount) => supabase
     .from('question_attempts')
-    .select('question_id, category, tags, passed, created_at')
+    .select('question_id, category, tags, passed, created_at', withCount ? { count: 'exact' } : undefined)
     .eq('user_id', userId)
     .order('created_at', { ascending: true })
     .order('id', { ascending: true })
